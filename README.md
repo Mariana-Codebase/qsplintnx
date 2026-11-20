@@ -32,12 +32,13 @@ moves out of band through shared memory; those are out of scope.
 
 The rule language is deliberately small, with no loops and no regular
 expressions, so the worst-case cost of checking one message is bounded. On
-a real-time system that bound matters as much as the block itself. On the
-development host the engine decides a message in tens of nanoseconds (about
-23 ns against an empty ruleset, growing roughly 43 ns per patch in the
-worst case where every patch is evaluated); the end-to-end IPC overhead
-`splintd` adds on a QNX target is measured by `bench/bench_ipc` and the
-numbers are reported with the target and build once collected.
+a real-time system that bound matters as much as the block itself. On a QNX
+8.0 x86_64 target under QEMU/KVM, deciding one message (the step that blocks
+a known-bad devctl) took about 1 microsecond, and `bench/bench_ipc` put the
+end-to-end overhead `splintd` adds at roughly 32 microseconds per message at
+the median, nearly all of it the extra IPC hop to the backend rather than the
+decision. Those are emulated figures; see `docs/qemu-validation.md` for the
+full run, and re-measure on a board before quoting them as hardware numbers.
 
 ## Status
 
