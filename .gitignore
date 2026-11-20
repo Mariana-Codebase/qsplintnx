@@ -1,0 +1,9 @@
+build/
+*.o
+*.a
+__pycache__/
+*.pyc
+crash-*
+leak-*
+timeout-*
+.army-state.md
