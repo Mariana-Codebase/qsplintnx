@@ -60,9 +60,12 @@ volatile uint32_t g_active_nprofile = 0;
 /* Connect/IO tables and the OCB mount, shared by every mapping. */
 static resmgr_connect_funcs_t g_cf;
 static resmgr_io_funcs_t      g_io;
+/* Designated init: zero-fills attr_lock/attr_unlock/attr_trylock (library
+ * defaults) and is robust to the field count across QNX header versions. */
 static iofunc_funcs_t         g_ocb_funcs = {
-    _IOFUNC_NFUNCS, splintd_ocb_calloc, splintd_ocb_free,
-    NULL, NULL   /* attr_lock / attr_unlock: use library defaults */
+    .nfuncs     = _IOFUNC_NFUNCS,
+    .ocb_calloc = splintd_ocb_calloc,
+    .ocb_free   = splintd_ocb_free,
 };
 static iofunc_mount_t         g_mount;
 
