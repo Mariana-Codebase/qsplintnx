@@ -72,7 +72,16 @@ static void resolve_exe_name(int32_t pid, char *out, size_t cap)
     if (base[0] == '\0')
         base = "?";
 
-    snprintf(out, cap, "%s", base);
+    /* Bounded copy (not snprintf): base may be up to 255 bytes and cap is 64,
+     * so truncation is expected and safe; written this way to satisfy
+     * -Werror=format-truncation. */
+    size_t bl = strlen(base);
+    if (cap == 0)
+        return;
+    if (bl >= cap)
+        bl = cap - 1;
+    memcpy(out, base, bl);
+    out[bl] = '\0';
 }
 
 int splintd_client_resolve(resmgr_context_t *ctp, int ioflag, splint_client_t *out)
