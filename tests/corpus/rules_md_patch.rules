@@ -1,0 +1,8 @@
+patch CVE-2026-0042 {
+  path    /dev/vendor_can            # required, exact match
+  match   devctl 0x0105              # required: <op> [<code>]
+  when    len > 64                   # optional, may repeat; ANDed
+  when    declared != len
+  action  block, log                 # required
+  errno   EPERM                      # optional, default EPERM
+}

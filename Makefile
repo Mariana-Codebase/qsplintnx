@@ -42,8 +42,9 @@ $(BUILD)/tests/%: tests/%.c tests/test_util.h $(BUILD)/libsplintcore.a
 test: host
 	@set -e; for t in $(TEST_BIN); do echo "== $$t"; $$t; done; echo "ALL TESTS PASSED"
 
+# Uses gcc: this environment ships clang without the sanitizer runtimes.
 sanitize:
-	$(MAKE) BUILD=build/san CC=clang CFLAGS="-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all" test
+	$(MAKE) BUILD=build/san CC=gcc CFLAGS="-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all" test
 
 fuzz:
 	@mkdir -p build/fuzz
@@ -60,6 +61,9 @@ QCC      ?= qcc
 QARCH    ?= gcc_ntox86_64
 QBUILD   := build/qnx-$(QARCH)
 QFLAGS   := -V$(QARCH) $(CSTD) -D_QNX_SOURCE -Wall -Wextra -Werror -O2 -g $(INC)
+# splintd uses secpol_resmgr_attach (SPLINT_USE_SECPOL defaults to 1). To drop it and
+# fall back to resmgr_attach: make qnx SPLINT_SECPOL_LIB= QFLAGS="$(QFLAGS) -DSPLINT_USE_SECPOL=0"
+SPLINT_SECPOL_LIB ?= -lsecpol
 
 QNX_SPLINTD := src/qnx/splintd_main.c src/qnx/interpose.c src/qnx/backend.c \
                src/qnx/ctl.c src/qnx/clientinfo.c
@@ -67,7 +71,7 @@ QNX_SPLINTD := src/qnx/splintd_main.c src/qnx/interpose.c src/qnx/backend.c \
 qnx:
 	@test -n "$(QNX_TARGET)" || { echo "QNX_TARGET not set: source ~/qnx800/qnxsdp-env.sh"; exit 1; }
 	@mkdir -p $(QBUILD)
-	$(QCC) $(QFLAGS) $(QNX_SPLINTD) $(CORE_SRC) -o $(QBUILD)/splintd
+	$(QCC) $(QFLAGS) $(QNX_SPLINTD) $(CORE_SRC) $(SPLINT_SECPOL_LIB) -o $(QBUILD)/splintd
 	$(QCC) $(QFLAGS) tools/splintctl/splintctl.c src/core/log.c src/core/msg.c -o $(QBUILD)/splintctl
 	$(QCC) $(QFLAGS) -Idemo/include demo/vendor_can/vendor_can.c -o $(QBUILD)/vendor_can
 	$(QCC) $(QFLAGS) -Idemo/include demo/clients/can_client.c -o $(QBUILD)/can_client

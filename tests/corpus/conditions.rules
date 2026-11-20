@@ -1,0 +1,15 @@
+# every operand, comparator and errno
+patch PAYLOAD-1 {
+  path /dev/ser1
+  match write
+  when byte[0] == 0x7e
+  when u16[2] >= 1024
+  when u32[252] < declared
+  when declared != len
+  when len <= 4096
+  action block
+  errno EINVAL
+}
+patch WATCH-1 { path /dev/ser1; match any; action log; errno EACCES }
+patch EIO-1 { path /dev/ser1; match lseek; action block; errno EIO }
+patch NS-1 { path /dev/ser1; match devctl 0xC0100505; action block; errno ENOTSUP }

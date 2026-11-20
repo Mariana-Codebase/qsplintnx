@@ -1,0 +1,10 @@
+profile /dev/vendor_can {
+  default block                       # or: default allow (default: allow)
+  allow open
+  allow devctl 0x0101 maxlen 16
+  allow devctl 0x0102..0x0104 client "can_client" maxlen 64
+  allow read  maxlen 512
+  rate 200 per s client "can_client"  # token bucket, burst = rate
+  rate 50 per s                       # applies to clients without a
+                                      # more specific rate line
+}

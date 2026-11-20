@@ -1,0 +1,5 @@
+patch CRLF {
+  path /dev/crlf
+  match open
+  action block
+}

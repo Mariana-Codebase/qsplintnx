@@ -1,0 +1,3 @@
+mode learn
+patch CVE-DEMO-0042 { path /dev/vendor_can; match devctl 0x0505; when len > 64; action block, log }
+profile /dev/vendor_can { default block; allow any client "can_client" }

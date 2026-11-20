@@ -1,6 +1,6 @@
 /*
- * QSplintNX - decision engine. Pure C99, no allocation on the hot path,
- * no syscalls: time comes in through msg->now_ns.
+ * QSplintNX - decision engine. C11 (atomics, _Thread_local), no allocation
+ * on the hot path, no syscalls: time comes in through msg->now_ns.
  *
  * Thread model: one engine per splintd. splint_engine_decide() may be
  * called concurrently from several resmgr threads. Ruleset swap is a
@@ -37,7 +37,9 @@ typedef struct splint_verdict {
     bool            log;          /* caller should emit an event          */
     bool            would_block;  /* learn mode: enforce would have blocked */
     int             err;          /* errno to reply when action == BLOCK  */
-    const char     *rule_id;      /* patch id, or NULL                    */
+    const char     *rule_id;      /* patch id, or NULL. Valid only until the
+                                     same thread's next splint_engine_decide();
+                                     copy or splint_log_push() it before then. */
     uint32_t        rule_line;    /* source line of deciding rule, or 0   */
 } splint_verdict_t;
 

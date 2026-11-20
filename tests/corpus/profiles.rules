@@ -1,0 +1,10 @@
+mode enforce
+profile /dev/a {
+  allow open; allow close; allow read maxlen 512; allow write maxlen 0
+  allow devctl 0x10000..0x2ffff client "we\"ird\\name"
+  allow other
+  rate 1 per s
+  rate 4294967295 per s client "fast"
+}
+profile /dev/b { default block }
+profile / { }
