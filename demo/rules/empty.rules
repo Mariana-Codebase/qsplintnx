@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# STATUS: written against QNX SDP 8.0 docs and docs/RULES.md, not yet parsed on target.
+# Empty baseline ruleset: enforce mode, no patches, no profiles. splintd starts
+# with this so the first exploit run reaches the driver unprotected.
+mode enforce

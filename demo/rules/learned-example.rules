@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+# STATUS: written against QNX SDP 8.0 docs and docs/RULES.md, not yet parsed on target.
+#
+# Example of what `splintctl learn-dump` would emit after watching can_client,
+# then hand-combined with the CVE-DEMO-0042 virtual patch. Run it in enforce
+# mode to get both an allow-list for the known-good client and the patch.
+#
+# Profile clause order follows docs/RULES.md:
+#   allow <op> [<code> | <lo>..<hi>] [client "<name>"] [maxlen <n>]
+
+mode enforce
+
+profile /dev/vendor_can {
+  default block
+  allow open
+  allow devctl 0x0501                                 # GET_STATUS
+  allow devctl 0x0502 maxlen 20                       # SEND_FRAME (frame is 16 bytes)
+  allow devctl 0x0505 client "can_client" maxlen 64   # SET_FILTER, bounded to table size
+  allow read maxlen 512
+  rate 200 per s client "can_client"
+}
+
+# Virtual patch for CVE-DEMO-0042 (vendor_can SET_FILTER overflow)
+patch CVE-DEMO-0042 {
+  path   /dev/vendor_can
+  match  devctl 0x0505
+  when   len > 64
+  action block, log
+}
