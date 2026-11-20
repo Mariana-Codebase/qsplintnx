@@ -80,8 +80,8 @@ static int vcan_devctl(resmgr_context_t *ctp, io_devctl_t *msg, RESMGR_OCB_T *oc
         return status;       /* generic DCMD handled by the library */
 
     void  *data   = _DEVCTL_DATA(msg->i);  /* payload after the header */
-    size_t in_len = ctp->info.srcmsglen > sizeof(msg->i)
-                    ? ctp->info.srcmsglen - sizeof(msg->i) : 0;
+    size_t src    = (size_t)ctp->info.srcmsglen;
+    size_t in_len = src > sizeof(msg->i) ? src - sizeof(msg->i) : 0;
     int    nbytes = 0;
 
     switch (msg->i.dcmd) {
