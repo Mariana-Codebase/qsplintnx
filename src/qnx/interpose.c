@@ -29,6 +29,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <time.h>
 #include <sys/neutrino.h>
 #include <sys/syspage.h>
@@ -123,6 +124,20 @@ typedef struct {
 
 static _Thread_local splintd_pending_open_t tls_pending;
 
+/* Map a QNX resource-manager connect ioflag to a POSIX open() oflag. The
+ * access mode lives in the low two bits as _IO_FLAG_RD / _IO_FLAG_WR, one
+ * higher than POSIX O_RDONLY/O_WRONLY/O_RDWR; other bits (O_NONBLOCK, ...)
+ * carry over unchanged. */
+static int splintd_ioflag_to_oflag(unsigned ioflag)
+{
+    unsigned rw = ioflag & (_IO_FLAG_RD | _IO_FLAG_WR);
+    if (rw == (_IO_FLAG_RD | _IO_FLAG_WR))
+        return O_RDWR;
+    if (rw == _IO_FLAG_WR)
+        return O_WRONLY;
+    return O_RDONLY;   /* _IO_FLAG_RD or none */
+}
+
 IOFUNC_OCB_T *splintd_ocb_calloc(resmgr_context_t *ctp, IOFUNC_ATTR_T *attr)
 {
     (void)ctp;
@@ -191,7 +206,11 @@ static int io_open(resmgr_context_t *ctp, io_open_t *msg,
     /* ALLOW: let iofunc_open_default() bind an OCB; splintd_ocb_calloc()
      * opens the backend using the identity/oflag we stash here. */
     tls_pending.client      = client;
-    tls_pending.oflag       = (int)msg->connect.ioflag;  /* VERIFY-ON-TARGET: ioflag->open flags */
+    /* QNX connect ioflag encodes the access mode as _IO_FLAG_RD (1) /
+     * _IO_FLAG_WR (2) in the low two bits, offset by one from POSIX
+     * O_RDONLY/O_WRONLY/O_RDWR. Translate before handing it to open();
+     * passing the raw ioflag made the backend open() fail with EACCES. */
+    tls_pending.oflag       = splintd_ioflag_to_oflag(msg->connect.ioflag);
     tls_pending.backend_err = 0;
     tls_pending.valid       = 1;
 
