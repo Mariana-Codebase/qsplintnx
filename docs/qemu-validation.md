@@ -69,8 +69,42 @@ the decision is ~1 us and the rest is the extra IPC hop to the backend. On real
 hardware the IPC hop is far cheaper; these numbers are the emulated figures and
 should be re-measured on a board before being quoted as hardware results.
 
-## Still to validate
+## secpol closes the bypass (spike S2)
 
-- Spike S2: build the image with `--secpol=secure` and confirm a non-`splintd`
-  client cannot connect to the relocated backend channel (EACCES/EPERM), i.e.
-  that the bypass is actually closed, not just unused.
+The image was rebuilt with `mkqnximage --secpol=develop --policy=qsplint.secpol`,
+where `qsplint.secpol` is the policy `tools/secpolgen` produces: it types the
+driver's channel `vendor_can_t` and grants `channel connect` to it only to
+`splintd_t`. Processes were started with their type via `on -T`:
+
+    on -T vendor_can_t  vendor_can ...
+    on -T splintd_t     splintd ...
+
+A client type trying to reach the driver's backend channel directly is denied
+by the kernel, even as root:
+
+    on -T exploit_t  can_client -p /dev/.splint/vendor_can
+    -> open(/dev/.splint/vendor_can): Operation not permitted   (rc=1)
+    secpolgenerate: can_client (type:exploit_t) failed to use ability
+        channel_connect:vendor_can_t as root
+
+The legitimate route through `splintd` still works:
+
+    on -T can_client_t  can_client -p /dev/vendor_can
+    -> connected, sent=5 errors=0   (rc=0)
+
+With the virtual patch loaded, both defenses hold at once:
+
+    on -T exploit_t exploit -p /dev/vendor_can        # through splintd
+    -> TRIGGER: blocked (errno=1, Operation not permitted)      (patch)
+    on -T exploit_t exploit -p /dev/.splint/vendor_can # straight at the driver
+    -> TRIGGER: cannot open ...: Operation not permitted         (secpol)
+    driver: still up
+
+So a message the patch would block cannot sidestep `splintd` by talking to the
+driver directly: secpol makes `splintd` the only path to the driver's channel.
+
+Notes from this develop-mode run, to tighten in a full `--secpol=secure` policy:
+`secpolgenerate` logged two uncovered accesses that develop mode allowed and a
+secure policy must grant explicitly: `splintctl_t` reading the rules file on the
+data filesystem (`channel_connect:devb_t`), and `splintd` reading
+`/proc/<pid>/exefile` for client names. Neither affects the bypass result above.
