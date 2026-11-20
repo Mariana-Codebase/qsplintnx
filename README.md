@@ -11,14 +11,33 @@ QSplintNX brings that idea inside the operating system. A daemon,
 `splintd`, sits in front of a driver in the QNX pathname space, inspects
 every message by its protocol semantics (operation, devctl code, declared
 versus real length, payload fields) and blocks the ones that match a known
-exploit, with no change to the driver and no restart. A QNX security
-policy (secpol) closes the bypass, so a client can reach the driver only
-through `splintd`.
+exploit, with no change to the driver and no restart.
+
+Concretely, `splintd` owns the driver's public path: in relocated mode the
+real driver is started on a private path and `splintd` registers the public
+one; in shadow mode `splintd` attaches the same path ahead of the driver
+with `_RESMGR_FLAG_BEFORE`. Either way a client's `open`/`read`/`write`/
+`devctl` messages land on `splintd`, which runs them past the ruleset and
+forwards the allowed ones to the real driver over its own connection. A QNX
+security policy (secpol) grants `channel connect` to the driver's channel
+only to `splintd`'s type, so no other process can reach the driver except
+through `splintd`; that is what closes the bypass.
+
+Inspection is stateless and per-message: each message is judged on its own
+operation, devctl code, declared-versus-actual length and fixed-offset
+payload fields. This catches the classic length-confusion, bad-command and
+malformed-argument bugs. It deliberately does not reconstruct deep stateful
+protocol sequences across many messages, and it does not see data a client
+moves out of band through shared memory; those are out of scope.
 
 The rule language is deliberately small, with no loops and no regular
-expressions, so the worst-case cost of checking one message is bounded.
-On a real-time system that bound matters as much as the block itself, so
-the overhead is measured in microseconds on the target.
+expressions, so the worst-case cost of checking one message is bounded. On
+a real-time system that bound matters as much as the block itself. On the
+development host the engine decides a message in tens of nanoseconds (about
+23 ns against an empty ruleset, growing roughly 43 ns per patch in the
+worst case where every patch is evaluated); the end-to-end IPC overhead
+`splintd` adds on a QNX target is measured by `bench/bench_ipc` and the
+numbers are reported with the target and build once collected.
 
 ## Status
 
