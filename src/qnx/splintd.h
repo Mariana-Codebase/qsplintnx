@@ -26,6 +26,14 @@
 #define SPLINTD_H
 
 #include <stdint.h>
+
+/* The QNX resmgr headers use IOFUNC_OCB_T / IOFUNC_ATTR_T (defined by each .c
+ * before including this header) inside function-pointer prototypes. Forward-
+ * declare the real struct tags at file scope first, so those pointers refer to
+ * these types and not to ones "declared inside parameter list". */
+struct splintd_ocb;
+struct splintd_mapping;
+
 #include <sys/iofunc.h>
 #include <sys/dispatch.h>
 #include <sys/resmgr.h>

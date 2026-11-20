@@ -61,7 +61,8 @@ volatile uint32_t g_active_nprofile = 0;
 static resmgr_connect_funcs_t g_cf;
 static resmgr_io_funcs_t      g_io;
 static iofunc_funcs_t         g_ocb_funcs = {
-    _IOFUNC_NFUNCS, splintd_ocb_calloc, splintd_ocb_free
+    _IOFUNC_NFUNCS, splintd_ocb_calloc, splintd_ocb_free,
+    NULL, NULL   /* attr_lock / attr_unlock: use library defaults */
 };
 static iofunc_mount_t         g_mount;
 
