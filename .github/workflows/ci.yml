@@ -1,0 +1,70 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Host CI for the portable core and tools. QNX binaries are not built here:
+# the QNX SDP is licensed and not available on GitHub runners.
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential clang
+          # libFuzzer and the sanitizer runtimes ship in libclang-rt-<major>-dev
+          major="$(clang -dumpversion | cut -d. -f1)"
+          sudo apt-get install -y --no-install-recommends "libclang-rt-${major}-dev" || true
+          gcc --version | head -n1
+          clang --version | head -n1
+
+      - name: Unit tests (gcc)
+        run: make test
+
+      - name: Unit tests under ASan + UBSan (clang)
+        run: make sanitize
+
+      - name: Engine micro-benchmark (informational)
+        continue-on-error: true
+        run: |
+          make bench | tee bench.md
+          cat bench.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: secpolgen unit tests
+        run: python3 -m unittest discover -v tools/secpolgen
+
+      - name: Shell syntax
+        run: |
+          for f in tools/qemu/*.sh; do bash -n "$f" && echo "ok $f"; done
+
+      - name: Fuzz smoke (30 s)
+        run: |
+          make fuzz
+          build/fuzz/fuzz_rules -max_total_time=30 tests/corpus
+
+      - name: Upload fuzz crashes
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes
+          path: |
+            crash-*
+            leak-*
+            timeout-*
+          if-no-files-found: ignore

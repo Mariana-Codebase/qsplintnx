@@ -1,0 +1,17 @@
+{
+  "comment": "QSplintNX demo: vendor_can relocated behind splintd. SPDX-License-Identifier: Apache-2.0",
+  "splintd_type": "splintd_t",
+  "ctl_client_type": "splintctl_t",
+  "ctl_path": "/dev/splint/ctl",
+  "nonroot": false,
+  "driver_abilities": true,
+  "mappings": [
+    {
+      "public": "/dev/vendor_can",
+      "backend": "/dev/.splint/vendor_can",
+      "driver_type": "vendor_can_t",
+      "mode": "relocated",
+      "clients": ["can_client_t", "exploit_t"]
+    }
+  ]
+}
