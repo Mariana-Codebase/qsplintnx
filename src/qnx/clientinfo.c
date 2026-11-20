@@ -90,10 +90,9 @@ int splintd_client_resolve(resmgr_context_t *ctp, int ioflag, splint_client_t *o
         return rc != EOK ? rc : EINVAL;
 
     out->pid = (int32_t)ci->pid;
-    if (ci->cred != NULL) {
-        out->uid = (uint32_t)ci->cred->euid;
-        out->gid = (uint32_t)ci->cred->egid;
-    }
+    /* _client_info.cred is a struct by value in QNX 8, not a pointer. */
+    out->uid = (uint32_t)ci->cred.euid;
+    out->gid = (uint32_t)ci->cred.egid;
     resolve_exe_name(out->pid, out->name, sizeof out->name);
 
     iofunc_client_info_ext_free(&ci);
