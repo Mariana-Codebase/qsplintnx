@@ -194,7 +194,8 @@ def load_config(path: str) -> Config:
 
 def _all_types(cfg: Config) -> list[str]:
     out: list[str] = []
-    for t in [cfg.splintd_type, cfg.ctl_client_type,
+    # "splint_ctl_t" is the type of splintd's isolated control channel.
+    for t in [cfg.splintd_type, cfg.ctl_client_type, "splint_ctl_t",
               *[m.driver_type for m in cfg.mappings],
               *[c for m in cfg.mappings for c in m.clients]]:
         if t not in out:
@@ -249,8 +250,10 @@ def generate_policy(cfg: Config, base_types: set[str] | None = None) -> str:
     a("# (src/qnx/clientinfo.c); check secpolgenerate output for any extra")
     a("# ability that needs.")
     L.extend(_ability_block(cfg.splintd_type, cfg.nonroot))
-    a("# Control node used by splintctl.")
-    a(f"allow_attach {cfg.splintd_type} {cfg.ctl_path};")
+    a("# Control node used by splintctl. splintd attaches it on its OWN channel,")
+    a("# typed splint_ctl_t via the optional channel-type field of allow_attach,")
+    a("# so the control channel is isolated from the public device channels.")
+    a(f"allow_attach {cfg.splintd_type} {cfg.ctl_path} splint_ctl_t;")
     for m in cfg.mappings:
         a(f"# Public path of {m.driver_type} ({m.mode} mapping): clients resolve here.")
         a(f"allow_attach {cfg.splintd_type} {m.public};")
@@ -284,15 +287,11 @@ def generate_policy(cfg: Config, base_types: set[str] | None = None) -> str:
         a("")
 
     a("# ---- control client ------------------------------------------------------")
-    a(f"allow {cfg.ctl_client_type} {cfg.splintd_type}:channel connect;")
-    a("# KNOWN LIMITATION: the control node and the public paths share splintd's")
-    a("# single channel, so every client type above can also reach the control")
-    a("# node at the channel level. Access to the control node is then decided by")
-    a("# splintd itself. Channel-level separation needs a second channel for the")
-    a("# control node, typed with the optional channel type of allow_attach, e.g.")
-    a(f"#   allow_attach {cfg.splintd_type} {cfg.ctl_path} splint_ctl_t;")
-    a(f"#   allow {cfg.ctl_client_type} splint_ctl_t:channel connect;")
-    a("# (not emitted: splintd does not create that channel yet).")
+    a("# ONLY the control client may connect to the control channel (splint_ctl_t).")
+    a("# No other type gets this rule, so no client of a protected device can reach")
+    a("# the control node and reload or inspect rules; the data channels are a")
+    a("# separate type and are governed by the per-mapping rules above.")
+    a(f"allow {cfg.ctl_client_type} splint_ctl_t:channel connect;")
     a("")
     return "\n".join(L)
 
@@ -412,13 +411,13 @@ def generate_check_script(cfg: Config) -> str:
         a("")
     if not any_reloc:
         a("echo \"no relocated mappings: nothing to test\"")
-    a("# Known limitation (reported, not counted): client types share splintd's")
-    a("# channel with the control node, so this open is NOT denied by secpol.")
+    a("# The control channel is isolated (type splint_ctl_t): a client of a")
+    a("# protected device must NOT be able to open the control node, and the")
+    a("# control client must.")
     clients = [c for m in cfg.mappings for c in m.clients]
     if clients:
-        a(f"if try_open {q(clients[0])} {q(cfg.ctl_path)} >/dev/null; then")
-        a(f"    echo \"INFO  {clients[0]} can open {cfg.ctl_path} (shared channel, known limitation)\"")
-        a("fi")
+        a(f"expect_denied {q(clients[0])} {q(cfg.ctl_path)}")
+    a(f"expect_allowed {q(cfg.ctl_client_type)} {q(cfg.ctl_path)}")
     a("")
     a("echo \"passed=$pass failed=$fail\"")
     a("exit $fail")

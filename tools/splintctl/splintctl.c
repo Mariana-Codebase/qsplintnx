@@ -138,16 +138,22 @@ static int cmd_reload(int fd, int argc, char **argv)
         fprintf(stderr, "%s: warning: %s: %s (splintd may still be able to read it)\n",
                 g_prog, r.path, strerror(errno));
 
-    if (ctl_devctl(fd, SPLINT_DCMD_RELOAD, &r, sizeof r, "reload") != EOK)
+    if (ctl_devctl(fd, SPLINT_DCMD_RELOAD, &r, sizeof r, "reload") != EOK) {
+        /* Transport failure: splintd did not install anything. */
+        fprintf(stderr, "%s: reload not applied; the previous ruleset is still active\n",
+                g_prog);
         return 1;
+    }
 
     if (r.status != 0) {
+        /* Parse error inside splintd: the running ruleset was left untouched. */
         r.err_msg[sizeof r.err_msg - 1] = '\0';
         printf("error at line %u col %u: %s\n", (unsigned)r.err_line,
                (unsigned)r.err_col, r.err_msg);
+        printf("reload not applied; the previous ruleset is still active\n");
         return 1;
     }
-    printf("OK\n");
+    printf("OK: rules activated\n");
     return 0;
 }
 

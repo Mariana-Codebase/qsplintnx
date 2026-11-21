@@ -60,7 +60,8 @@ class TestExamplePolicy(unittest.TestCase):
 
     def test_splintd_attaches_public_and_ctl(self):
         self.assertIn("allow_attach splintd_t /dev/vendor_can;", self.rules)
-        self.assertIn("allow_attach splintd_t /dev/splint/ctl;", self.rules)
+        # The control node is attached on its own channel, typed splint_ctl_t.
+        self.assertIn("allow_attach splintd_t /dev/splint/ctl splint_ctl_t;", self.rules)
 
     def test_only_driver_attaches_backend(self):
         attach = [r for r in self.rules if r.startswith("allow_attach") and
@@ -71,9 +72,19 @@ class TestExamplePolicy(unittest.TestCase):
         conn = [r for r in self.rules if "vendor_can_t:channel connect" in r]
         self.assertEqual(conn, ["allow splintd_t vendor_can_t:channel connect;"])
 
-    def test_clients_and_ctl_connect_to_splintd(self):
-        for t in ("can_client_t", "exploit_t", "splintctl_t"):
+    def test_clients_connect_to_splintd(self):
+        for t in ("can_client_t", "exploit_t"):
             self.assertIn(f"allow {t} splintd_t:channel connect;", self.rules)
+
+    def test_ctl_channel_isolated(self):
+        # Only the control client may connect to the isolated control channel,
+        # and it does NOT connect to the data channel (splintd_t).
+        self.assertIn("allow splintctl_t splint_ctl_t:channel connect;", self.rules)
+        self.assertNotIn("allow splintctl_t splintd_t:channel connect;", self.rules)
+        self.assertIn("type splint_ctl_t;", self.rules)
+        # No device-client type may reach the control channel.
+        for t in ("can_client_t", "exploit_t"):
+            self.assertNotIn(f"allow {t} splint_ctl_t:channel connect;", self.rules)
 
     def test_no_client_reaches_driver(self):
         for r in self.rules:
@@ -81,8 +92,10 @@ class TestExamplePolicy(unittest.TestCase):
                 self.assertTrue(r.startswith("allow splintd_t ") or
                                 r.startswith("allow vendor_can_t self:"), r)
 
-    def test_limitation_flagged(self):
-        self.assertIn("KNOWN LIMITATION", self.text)
+    def test_control_channel_not_shared(self):
+        # The old shared-channel limitation must be gone from the output.
+        self.assertNotIn("KNOWN LIMITATION", self.text)
+        self.assertNotIn("shared channel", self.text)
 
     def test_statements_terminated(self):
         for r in self.rules:
@@ -224,6 +237,12 @@ class TestCheckBypass(unittest.TestCase):
         self.assertIn("EACCES", self.out)
         self.assertIn("EPERM", self.out)
 
+    def test_ctl_channel_checked(self):
+        # The isolated control channel: a device client is denied, the control
+        # client is allowed.
+        self.assertIn("expect_denied can_client_t /dev/splint/ctl", self.out)
+        self.assertIn("expect_allowed splintctl_t /dev/splint/ctl", self.out)
+
     def test_not_a_policy(self):
         self.assertNotIn("allow_attach", self.out)
 
@@ -233,7 +252,12 @@ class TestCheckBypass(unittest.TestCase):
         del d["mappings"][0]["backend"]
         out = secpolgen.generate_check_script(secpolgen.parse_config(d))
         self.assertIn("SKIP", out)
-        self.assertNotIn("expect_denied", out.split("expect_allowed() {")[1].split("}\n", 1)[1])
+        # Shadow mapping: the backend shares the public path, so there is no
+        # backend-path bypass check. The isolated control channel is still
+        # checked (it is independent of mapping mode).
+        body = out.split("expect_allowed() {")[1].split("}\n", 1)[1]
+        self.assertNotIn("/dev/vendor_can\n", body.replace("/dev/splint/ctl", ""))
+        self.assertIn("expect_denied can_client_t /dev/splint/ctl", body)
 
     @unittest.skipUnless(shutil.which("bash"), "bash not available")
     def test_bash_syntax(self):

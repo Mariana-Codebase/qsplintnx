@@ -69,7 +69,8 @@ typedef struct splintd_ocb {
 
 /* Global daemon state (single instance, defined in splintd_main.c). */
 typedef struct splintd {
-    dispatch_t         *dpp;
+    dispatch_t         *dpp;        /* public device paths           */
+    dispatch_t         *ctl_dpp;    /* control node: its OWN channel  */
     splint_engine_t    *engine;
     splint_log_t       *log;
     /* The learn table is allocated once (lazily, with a CAS) and never freed

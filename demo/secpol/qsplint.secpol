@@ -11,6 +11,7 @@
 # ---- types ---------------------------------------------------------------
 type splintd_t;
 type splintctl_t;
+type splint_ctl_t;
 type vendor_can_t;
 type can_client_t;
 type exploit_t;
@@ -27,8 +28,10 @@ allow splintd_t self:ability {
     pathspace
     public_channel
 };
-# Control node used by splintctl.
-allow_attach splintd_t /dev/splint/ctl;
+# Control node used by splintctl. splintd attaches it on its OWN channel,
+# typed splint_ctl_t via the optional channel-type field of allow_attach,
+# so the control channel is isolated from the public device channels.
+allow_attach splintd_t /dev/splint/ctl splint_ctl_t;
 # Public path of vendor_can_t (relocated mapping): clients resolve here.
 allow_attach splintd_t /dev/vendor_can;
 
@@ -53,12 +56,8 @@ allow can_client_t splintd_t:channel connect;
 allow exploit_t splintd_t:channel connect;
 
 # ---- control client ------------------------------------------------------
-allow splintctl_t splintd_t:channel connect;
-# KNOWN LIMITATION: the control node and the public paths share splintd's
-# single channel, so every client type above can also reach the control
-# node at the channel level. Access to the control node is then decided by
-# splintd itself. Channel-level separation needs a second channel for the
-# control node, typed with the optional channel type of allow_attach, e.g.
-#   allow_attach splintd_t /dev/splint/ctl splint_ctl_t;
-#   allow splintctl_t splint_ctl_t:channel connect;
-# (not emitted: splintd does not create that channel yet).
+# ONLY the control client may connect to the control channel (splint_ctl_t).
+# No other type gets this rule, so no client of a protected device can reach
+# the control node and reload or inspect rules; the data channels are a
+# separate type and are governed by the per-mapping rules above.
+allow splintctl_t splint_ctl_t:channel connect;

@@ -246,6 +246,37 @@ static int attach_mapping(splintd_mapping_t *m)
     return 0;
 }
 
+/* Create and start a resmgr thread pool bound to dispatch dpp. Returns 0 on
+ * success. flags 0 => thread_pool_start() returns and the caller continues. */
+static int start_resmgr_pool(dispatch_t *dpp, const char *name,
+                             unsigned lo, unsigned hi)
+{
+    thread_pool_attr_t pa;
+    memset(&pa, 0, sizeof pa);
+    pa.handle        = dpp;
+    pa.context_alloc = (void *)dispatch_context_alloc;
+    pa.context_free  = (void *)dispatch_context_free;
+    pa.block_func    = (void *)dispatch_block;
+    pa.unblock_func  = (void *)dispatch_unblock;
+    pa.handler_func  = (void *)dispatch_handler;
+    pa.tid_name      = name;
+    pa.lo_water      = lo;
+    pa.hi_water      = hi;
+    pa.increment     = 1;
+    pa.maximum       = hi;
+
+    thread_pool_t *tpp = thread_pool_create(&pa, 0);
+    if (tpp == NULL) {
+        fprintf(stderr, "splintd: thread_pool_create (%s): %s\n", name, strerror(errno));
+        return -1;
+    }
+    if (thread_pool_start(tpp) != 0) {
+        fprintf(stderr, "splintd: thread_pool_start (%s): %s\n", name, strerror(errno));
+        return -1;
+    }
+    return 0;
+}
+
 /* ------------------------------------------------------------------ */
 int main(int argc, char **argv)
 {
@@ -315,7 +346,17 @@ int main(int argc, char **argv)
         }
     }
 
-    int crc = splintd_ctl_attach(g_splintd.dpp, g_splintd.ctl_path);
+    /* The control node lives on its OWN dispatch, hence its own channel, so a
+     * security policy can type that channel (splint_ctl_t) and let only
+     * splintctl connect to it. Sharing splintd's data-path channel would let
+     * any client of a protected device reach the control node at the channel
+     * level; a separate channel removes that. */
+    g_splintd.ctl_dpp = dispatch_create();
+    if (g_splintd.ctl_dpp == NULL) {
+        fprintf(stderr, "splintd: dispatch_create (ctl): %s\n", strerror(errno));
+        return 1;
+    }
+    int crc = splintd_ctl_attach(g_splintd.ctl_dpp, g_splintd.ctl_path);
     if (crc != 0) {
         fprintf(stderr, "splintd: ctl attach %s: %s\n", g_splintd.ctl_path, strerror(crc));
         return 1;
@@ -330,30 +371,12 @@ int main(int argc, char **argv)
     sigaddset(&set, SIGHUP);
     pthread_sigmask(SIG_BLOCK, &set, NULL);
 
-    thread_pool_attr_t pa;
-    memset(&pa, 0, sizeof pa);
-    pa.handle        = g_splintd.dpp;
-    pa.context_alloc = (void *)dispatch_context_alloc;
-    pa.context_free  = (void *)dispatch_context_free;
-    pa.block_func    = (void *)dispatch_block;
-    pa.unblock_func  = (void *)dispatch_unblock;
-    pa.handler_func  = (void *)dispatch_handler;
-    pa.tid_name      = "splintd";
-    pa.lo_water      = (threads < 2) ? 1u : 2u;
-    pa.hi_water      = (unsigned)threads;
-    pa.increment     = 1;
-    pa.maximum       = (unsigned)threads;
-
-    /* flags 0 => thread_pool_start() returns and this thread continues. */
-    thread_pool_t *tpp = thread_pool_create(&pa, 0);
-    if (tpp == NULL) {
-        fprintf(stderr, "splintd: thread_pool_create: %s\n", strerror(errno));
+    /* Data-path pool, and a small separate pool for the control channel. */
+    if (start_resmgr_pool(g_splintd.dpp, "splintd",
+                          (threads < 2) ? 1u : 2u, (unsigned)threads) != 0)
         return 1;
-    }
-    if (thread_pool_start(tpp) != 0) {
-        fprintf(stderr, "splintd: thread_pool_start: %s\n", strerror(errno));
+    if (start_resmgr_pool(g_splintd.ctl_dpp, "splintd-ctl", 1u, 2u) != 0)
         return 1;
-    }
 
     if (g_splintd.verbose)
         fprintf(stderr, "splintd: %d mapping(s), ctl %s, %d thread(s)\n",
