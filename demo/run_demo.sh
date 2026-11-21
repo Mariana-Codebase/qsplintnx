@@ -76,6 +76,16 @@ if [ "$SECPOL" = 1 ]; then
     run_as exploit_t ./exploit -p "$PUBLIC";  echo "(exit $?)"
     echo "# straight at the driver (denied by secpol):"
     run_as exploit_t ./exploit -p "$BACKEND"; echo "(exit $?)"
+
+    banner "9. the control channel is isolated: only splintctl may reach it"
+    echo "# splintctl reaches the control node (allowed):"
+    run_as splintctl_t ./splintctl -c "$CTL" stats >/dev/null 2>&1
+    echo "(splintctl_t exit $? -- expect 0)"
+    echo "# a device client's type tries the control node (denied by secpol):"
+    run_as exploit_t ./splintctl -c "$CTL" stats
+    echo "(exploit_t exit $? -- expect non-zero)"
+    run_as can_client_t ./splintctl -c "$CTL" reload "$BIN/empty.rules"
+    echo "(can_client_t reload exit $? -- expect non-zero)"
 fi
 
 banner "done"
