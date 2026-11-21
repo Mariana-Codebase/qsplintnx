@@ -103,6 +103,36 @@ With the virtual patch loaded, both defenses hold at once:
 So a message the patch would block cannot sidestep `splintd` by talking to the
 driver directly: secpol makes `splintd` the only path to the driver's channel.
 
+## Concurrency: the learn-table reload race is gone
+
+An earlier version freed the learn table on a mode switch while a worker thread
+might still hold the pointer (a use-after-free on the security boundary). The
+table is now allocated once and never freed while the daemon runs; an atomic
+`learn_active` flag gates observation. Stress on target: a client at 200 Hz
+while the ruleset was reloaded 80 times, alternating learn and enforce:
+
+    racing reloads... reloads done
+    SPLINTD_ALIVE pid=1118230
+
+splintd stayed up. Learn mode still produces a correct profile from observed
+traffic:
+
+    splintctl learn-dump ->
+    profile /dev/vendor_can {
+      default block
+      allow open   client "can_client"
+      allow devctl 0x0501 client "can_client" maxlen 0
+      allow devctl 0x0502 client "can_client" maxlen 20
+      allow devctl 0x0505 client "can_client" maxlen 40
+      rate 48 per s client "can_client"
+    }
+
+## Reproducing
+
+`demo/run_demo.sh` runs the whole sequence on the target (steps 1-7 above, and
+step 8, the bypass check, when `SECPOL=1`). The transcript in this document is
+its output on the secure image.
+
 Notes from this develop-mode run, to tighten in a full `--secpol=secure` policy:
 `secpolgenerate` logged two uncovered accesses that develop mode allowed and a
 secure policy must grant explicitly: `splintctl_t` reading the rules file on the
