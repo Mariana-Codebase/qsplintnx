@@ -9,7 +9,7 @@
  * path and relies on its own io_open returning ENOENT to its pid so the open
  * falls through to the driver behind it.
  *
- * STATUS: written against QNX SDP 8.0 docs, not yet compiled on target.
+ * STATUS: cross-compiled with qcc for QNX 8.0 (gcc_ntox86_64) and validated on a QEMU/KVM target; see docs/qemu-validation.md.
  *
  * API references verified against the SDP 8.0 documentation:
  *   devctl()  .../d/devctl.html  (returns EOK or an errno, NOT -1/errno;

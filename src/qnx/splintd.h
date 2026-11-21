@@ -72,7 +72,13 @@ typedef struct splintd {
     dispatch_t         *dpp;
     splint_engine_t    *engine;
     splint_log_t       *log;
-    splint_learn_t     *learn;           /* non-NULL when mode learn active */
+    /* The learn table is allocated once (lazily, with a CAS) and never freed
+     * while the daemon runs, so a worker that has loaded g_splintd.learn can
+     * always use it safely. learn_active (atomic) says whether learn mode is
+     * on; observers check it before recording. This removes the earlier
+     * free-on-reload use-after-free. */
+    splint_learn_t     *learn;
+    volatile int        learn_active;
     char                rules_path[256];
     char                ctl_path[SPLINT_PATH_MAX];
     int                 nmap;

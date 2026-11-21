@@ -9,7 +9,7 @@
  * attribute and its own io_devctl handler. Every in/out length is validated
  * against the transport (srcmsglen / dstmsglen) before use.
  *
- * STATUS: written against QNX SDP 8.0 docs, not yet compiled on target.
+ * STATUS: cross-compiled with qcc for QNX 8.0 (gcc_ntox86_64) and validated on a QEMU/KVM target; see docs/qemu-validation.md.
  *
  * API references verified against the SDP 8.0 documentation:
  *   devctl reply layout  .../messages_Sample_IO_DEVCTL.html
@@ -134,9 +134,11 @@ static int ctl_do_learn_dump(const void *in, size_t in_real, size_t *out_nbytes)
     memset(rep, 0, sizeof *rep);
     memcpy(rep->path, req.path, sizeof rep->path);
 
-    splint_learn_t *lrn = g_splintd.learn;
+    /* The learn table is never freed while the daemon runs; dump what it holds
+     * as long as it exists (learn mode is or was active). */
+    splint_learn_t *lrn = __atomic_load_n(&g_splintd.learn, __ATOMIC_ACQUIRE);
     if (lrn == NULL) {
-        rep->status = EAGAIN;                      /* learn mode not active */
+        rep->status = EAGAIN;                      /* learn mode never activated */
         *out_nbytes = sizeof *rep;
         return EOK;
     }

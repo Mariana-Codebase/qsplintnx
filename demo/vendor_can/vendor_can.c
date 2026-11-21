@@ -4,7 +4,7 @@
  * QSplintNX demo. It is a small QNX resource manager that answers GET_STATUS,
  * SEND_FRAME and SET_FILTER on its path.
  *
- * STATUS: written against QNX SDP 8.0 docs, validated by cross-compile on target.
+ * STATUS: cross-compiled with qcc for QNX 8.0 and validated on a QEMU/KVM target; see docs/qemu-validation.md.
  *
  * It contains ONE deliberate reliability bug (CVE-DEMO-0042): SET_FILTER copies
  * the received payload into a 64-byte filter table without checking the length.

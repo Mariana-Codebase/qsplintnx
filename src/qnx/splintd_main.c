@@ -12,7 +12,7 @@
  *     -m  relocated mapping (driver on a hidden path)
  *     -s  shadow mapping   (driver on the same path, splintd attached BEFORE)
  *
- * STATUS: written against QNX SDP 8.0 docs, not yet compiled on target.
+ * STATUS: cross-compiled with qcc for QNX 8.0 (gcc_ntox86_64) and validated on a QEMU/KVM target; see docs/qemu-validation.md.
  *
  * API references verified against the SDP 8.0 documentation:
  *   resmgr_attach / flags   .../r/resmgr_attach.html
@@ -138,19 +138,27 @@ int splintd_load_rules(const char *path, splint_parse_error_t *err)
     uint32_t npatch   = rs->npatch;
     uint32_t nprofile = rs->nprofile;
 
-    /* Learn-table lifecycle follows the mode. NOTE / hardening (for the
-     * Commander): freeing the learn table while a decision thread still holds
-     * the old pointer is a small race; reloads are rare, but a production
-     * build wants an epoch/refcount here. */
+    /* Learn-table lifecycle. The table is allocated once and never freed while
+     * the daemon runs; mode changes only flip the atomic learn_active flag, so
+     * a worker that already loaded g_splintd.learn can never have it freed
+     * underneath it. Entering learn mode (0 -> 1) starts a clean session. */
     if (mode == SPLINT_MODE_LEARN) {
-        if (g_splintd.learn == NULL) {
+        if (__atomic_load_n(&g_splintd.learn, __ATOMIC_ACQUIRE) == NULL) {
             splint_learn_t *nl = splint_learn_new(NULL);
-            __atomic_store_n(&g_splintd.learn, nl, __ATOMIC_RELEASE);
+            splint_learn_t *expected = NULL;
+            if (!__atomic_compare_exchange_n(&g_splintd.learn, &expected, nl,
+                                             false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+                /* another thread installed one first; drop ours */
+                splint_learn_free(nl);
+            }
+        }
+        if (__atomic_exchange_n(&g_splintd.learn_active, 1, __ATOMIC_ACQ_REL) == 0) {
+            splint_learn_t *l = __atomic_load_n(&g_splintd.learn, __ATOMIC_ACQUIRE);
+            if (l != NULL)
+                splint_learn_reset(l);     /* fresh session; reset is thread-safe */
         }
     } else {
-        splint_learn_t *old = __atomic_exchange_n(&g_splintd.learn, NULL, __ATOMIC_ACQ_REL);
-        if (old != NULL)
-            splint_learn_free(old);
+        __atomic_store_n(&g_splintd.learn_active, 0, __ATOMIC_RELEASE);
     }
 
     splint_engine_set_rules(g_splintd.engine, rs);     /* takes ownership of rs */

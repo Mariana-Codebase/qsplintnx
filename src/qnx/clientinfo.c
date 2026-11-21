@@ -7,7 +7,7 @@
  * /proc/<pid>/exefile. Everything is bounded and must not block for long,
  * because it runs on the open() hot path.
  *
- * STATUS: written against QNX SDP 8.0 docs, not yet compiled on target.
+ * STATUS: cross-compiled with qcc for QNX 8.0 (gcc_ntox86_64) and validated on a QEMU/KVM target; see docs/qemu-validation.md.
  *
  * API references verified against the SDP 8.0 documentation:
  *   iofunc_client_info_ext      .../i/iofunc_client_info_ext.html

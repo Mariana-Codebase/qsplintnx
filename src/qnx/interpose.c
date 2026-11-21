@@ -9,7 +9,7 @@
  * the transport (ctp->info.srcmsglen), never trusted from the client's
  * nbytes header, because this code is a security boundary.
  *
- * STATUS: written against QNX SDP 8.0 docs, not yet compiled on target.
+ * STATUS: cross-compiled with qcc for QNX 8.0 (gcc_ntox86_64) and validated on a QEMU/KVM target; see docs/qemu-validation.md.
  *
  * API references verified against the SDP 8.0 documentation:
  *   iofunc_func_init / tables  .../i/iofunc_func_init.html, .../r/resmgr_io_funcs_t.html
@@ -100,9 +100,13 @@ static int splintd_block_reply(const splint_msg_t *m, const splint_verdict_t *v,
 static void splintd_allow_account(const splint_msg_t *m, const splint_verdict_t *v, uint64_t t0)
 {
     uint64_t lat = splintd_now_ns() - t0;
-    splint_learn_t *lrn = g_splintd.learn;        /* single load; may be swapped on reload */
-    if (lrn)
-        splint_learn_observe(lrn, m);
+    /* The learn table is never freed while the daemon runs; learn_active gates
+     * recording. Both loads are atomic. */
+    if (__atomic_load_n(&g_splintd.learn_active, __ATOMIC_ACQUIRE)) {
+        splint_learn_t *lrn = __atomic_load_n(&g_splintd.learn, __ATOMIC_ACQUIRE);
+        if (lrn)
+            splint_learn_observe(lrn, m);
+    }
     if (v->log && g_splintd.log)
         splint_log_push(g_splintd.log, m, v, clamp_u32(lat));
     splintd_record_latency(lat);

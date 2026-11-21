@@ -2,7 +2,7 @@
 /*
  * can_client - a well-behaved ECU-like client for the QSplintNX demo.
  *
- * STATUS: written against QNX SDP 8.0 docs, not yet compiled on target.
+ * STATUS: cross-compiled with qcc for QNX 8.0 (gcc_ntox86_64) and validated on a QEMU/KVM target; see docs/qemu-validation.md.
  *
  * It opens the public CAN path, reads status, installs a short (legal) filter,
  * then sends frames at a steady rate and prints one status line per second.
