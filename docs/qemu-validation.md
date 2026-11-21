@@ -103,6 +103,37 @@ With the virtual patch loaded, both defenses hold at once:
 So a message the patch would block cannot sidestep `splintd` by talking to the
 driver directly: secpol makes `splintd` the only path to the driver's channel.
 
+## The control channel is isolated
+
+`splintd` serves two kinds of channel. The public device nodes share one
+dispatch channel, relabeled to `splint_data_t`; the control node
+`/dev/splint/ctl` sits on a second dispatch channel, relabeled to
+`splint_ctl_t`. Neither uses `splintd`'s process type, so a `channel connect`
+rule can allow one without allowing the other. Relabeling a channel needs the
+`settypeid` ability, which the policy grants `splintd_t` for both types; the
+policy then lets device-client types connect only to `splint_data_t` and lets
+only `splintctl_t` connect to `splint_ctl_t`.
+
+On the secure image, only `splintctl` reaches the control node:
+
+    on -T splintctl_t  splintctl -c /dev/splint/ctl stats
+    -> rc=0 (stats printed)
+
+A device-client type is denied at the connect, even as root:
+
+    on -T exploit_t    splintctl -c /dev/splint/ctl stats
+    -> splintctl: cannot open /dev/splint/ctl: Operation not permitted  (rc=1)
+    secpolgenerate: splintctl (type:exploit_t) failed to use ability
+        channel_connect:splint_ctl_t as root
+
+    on -T can_client_t splintctl -c /dev/splint/ctl reload empty.rules
+    -> splintctl: cannot open /dev/splint/ctl: Operation not permitted  (rc=1)
+
+So a client of a protected device cannot reload rules, read the event log, or
+otherwise drive the daemon it sits behind: the control interface is reachable
+only by the control client's type. A reload that is refused this way leaves the
+active ruleset in place; `splintctl` reports the failure and exits non-zero.
+
 ## Concurrency: the learn-table reload race is gone
 
 An earlier version freed the learn table on a mode switch while a worker thread
