@@ -4,13 +4,16 @@
 #
 # Policy language: QNX OS System Security Guide 8.0, 'Security policy language'.
 # Once a policy is installed no path can be attached unless an allow_attach
-# rule names it, and a process may connect only to channels of type default
-# unless a 'channel connect' rule allows it. Channels inherit the type of
-# the process that owns them. QSplintNX relies on both properties.
+# rule names it, and a process may connect to a channel only when a
+# 'channel connect' rule allows its type to reach that channel's type. A
+# channel takes its owner's process type unless allow_attach relabels it;
+# splintd relabels its data and control channels to distinct types so the
+# two can be governed separately. QSplintNX relies on both properties.
 
 # ---- types ---------------------------------------------------------------
 type splintd_t;
 type splintctl_t;
+type splint_data_t;
 type splint_ctl_t;
 type vendor_can_t;
 type can_client_t;
@@ -24,16 +27,23 @@ type exploit_t;
 # ability that needs.
 # pathspace: resmgr_attach() adds names to the path space.
 # public_channel: dispatch_create() makes a non-private channel.
+# settypeid: dispatch_create() + resmgr_attach() of a channel whose
+# type differs from the process type (the data and control channels).
 allow splintd_t self:ability {
     pathspace
     public_channel
+    settypeid:splint_data_t
+    settypeid:splint_ctl_t
 };
-# Control node used by splintctl. splintd attaches it on its OWN channel,
-# typed splint_ctl_t via the optional channel-type field of allow_attach,
-# so the control channel is isolated from the public device channels.
-allow_attach splintd_t /dev/splint/ctl splint_ctl_t;
+# The public device nodes share one dispatch channel, typed splint_data_t
+# via the optional channel-type field of allow_attach. Clients connect to
+# splint_data_t, never to splintd's process type.
 # Public path of vendor_can_t (relocated mapping): clients resolve here.
-allow_attach splintd_t /dev/vendor_can;
+allow_attach splintd_t /dev/vendor_can splint_data_t;
+# Control node used by splintctl. splintd attaches it on a SEPARATE channel,
+# typed splint_ctl_t, so the control channel is isolated from the public
+# device channels and only splintctl may connect to it.
+allow_attach splintd_t /dev/splint/ctl splint_ctl_t;
 
 # ---- mapping /dev/vendor_can (relocated) ----------------------------
 # The driver vendor_can_t is itself a resource manager.
@@ -51,9 +61,10 @@ allow_attach vendor_can_t /dev/.splint/vendor_can;
 # No client type gets this rule: opening the backend path directly, or
 # ConnectAttach() to the driver's channel, fails with a permission error.
 allow splintd_t vendor_can_t:channel connect;
-# Clients allowed to use /dev/vendor_can connect to splintd, never to the driver.
-allow can_client_t splintd_t:channel connect;
-allow exploit_t splintd_t:channel connect;
+# Clients allowed to use /dev/vendor_can connect to the data channel
+# (splint_data_t), never to the driver and never to the control channel.
+allow can_client_t splint_data_t:channel connect;
+allow exploit_t splint_data_t:channel connect;
 
 # ---- control client ------------------------------------------------------
 # ONLY the control client may connect to the control channel (splint_ctl_t).

@@ -56,10 +56,15 @@ class TestExamplePolicy(unittest.TestCase):
 
     def test_splintd_abilities(self):
         i = self.rules.index("allow splintd_t self:ability {")
-        self.assertEqual(self.rules[i + 1:i + 4], ["pathspace", "public_channel", "};"])
+        # splintd also needs settypeid to relabel its data and control channels.
+        self.assertEqual(
+            self.rules[i + 1:i + 6],
+            ["pathspace", "public_channel",
+             "settypeid:splint_data_t", "settypeid:splint_ctl_t", "};"])
 
     def test_splintd_attaches_public_and_ctl(self):
-        self.assertIn("allow_attach splintd_t /dev/vendor_can;", self.rules)
+        # Public device node carries the data-channel type, not splintd's type.
+        self.assertIn("allow_attach splintd_t /dev/vendor_can splint_data_t;", self.rules)
         # The control node is attached on its own channel, typed splint_ctl_t.
         self.assertIn("allow_attach splintd_t /dev/splint/ctl splint_ctl_t;", self.rules)
 
@@ -72,16 +77,21 @@ class TestExamplePolicy(unittest.TestCase):
         conn = [r for r in self.rules if "vendor_can_t:channel connect" in r]
         self.assertEqual(conn, ["allow splintd_t vendor_can_t:channel connect;"])
 
-    def test_clients_connect_to_splintd(self):
+    def test_clients_connect_to_data_channel(self):
+        # Device clients connect to the data channel type, never to splintd's
+        # process type and never to the control channel.
         for t in ("can_client_t", "exploit_t"):
-            self.assertIn(f"allow {t} splintd_t:channel connect;", self.rules)
+            self.assertIn(f"allow {t} splint_data_t:channel connect;", self.rules)
+            self.assertNotIn(f"allow {t} splintd_t:channel connect;", self.rules)
 
     def test_ctl_channel_isolated(self):
         # Only the control client may connect to the isolated control channel,
-        # and it does NOT connect to the data channel (splintd_t).
+        # and it does NOT connect to the data channel (splint_data_t).
         self.assertIn("allow splintctl_t splint_ctl_t:channel connect;", self.rules)
+        self.assertNotIn("allow splintctl_t splint_data_t:channel connect;", self.rules)
         self.assertNotIn("allow splintctl_t splintd_t:channel connect;", self.rules)
         self.assertIn("type splint_ctl_t;", self.rules)
+        self.assertIn("type splint_data_t;", self.rules)
         # No device-client type may reach the control channel.
         for t in ("can_client_t", "exploit_t"):
             self.assertNotIn(f"allow {t} splint_ctl_t:channel connect;", self.rules)
@@ -125,7 +135,7 @@ class TestExamplePolicy(unittest.TestCase):
         del m["backend"]
         rules = rule_lines(secpolgen.generate_policy(secpolgen.parse_config(data)))
         self.assertIn("allow_attach vendor_can_t /dev/vendor_can;", rules)
-        self.assertIn("allow_attach splintd_t /dev/vendor_can;", rules)
+        self.assertIn("allow_attach splintd_t /dev/vendor_can splint_data_t;", rules)
         self.assertIn("allow splintd_t vendor_can_t:channel connect;", rules)
 
 

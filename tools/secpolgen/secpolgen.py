@@ -194,8 +194,13 @@ def load_config(path: str) -> Config:
 
 def _all_types(cfg: Config) -> list[str]:
     out: list[str] = []
-    # "splint_ctl_t" is the type of splintd's isolated control channel.
-    for t in [cfg.splintd_type, cfg.ctl_client_type, "splint_ctl_t",
+    # splintd serves two kinds of channel, each with its own type:
+    #   splint_data_t  the public device channels clients connect to;
+    #   splint_ctl_t   the isolated control channel only splintctl connects to.
+    # Giving the data channels a type of their own (instead of splintd's
+    # process type) is what lets secpol allow a connect to one without
+    # allowing a connect to the other.
+    for t in [cfg.splintd_type, cfg.ctl_client_type, "splint_data_t", "splint_ctl_t",
               *[m.driver_type for m in cfg.mappings],
               *[c for m in cfg.mappings for c in m.clients]]:
         if t not in out:
@@ -203,11 +208,14 @@ def _all_types(cfg: Config) -> list[str]:
     return out
 
 
-def _ability_block(type_name: str, nonroot: bool) -> list[str]:
+def _ability_block(type_name: str, nonroot: bool, extra: list[str] | None = None) -> list[str]:
     # Comments are kept outside the braces on purpose: the docs show '#'
     # comments anywhere, but no example puts one inside an ability block.
     lines = ["# pathspace: resmgr_attach() adds names to the path space.",
              "# public_channel: dispatch_create() makes a non-private channel."]
+    if extra:
+        lines.append("# settypeid: dispatch_create() + resmgr_attach() of a channel whose")
+        lines.append("# type differs from the process type (the data and control channels).")
     if nonroot:
         lines.append("# nonroot: the abilities also apply when running as non-root.")
     lines.append(f"allow {type_name} self:ability {{")
@@ -215,6 +223,8 @@ def _ability_block(type_name: str, nonroot: bool) -> list[str]:
         lines.append("    nonroot")
     lines.append("    pathspace")
     lines.append("    public_channel")
+    for e in extra or []:
+        lines.append(f"    {e}")
     lines.append("};")
     return lines
 
@@ -231,9 +241,11 @@ def generate_policy(cfg: Config, base_types: set[str] | None = None) -> str:
     a("#")
     a("# Policy language: QNX OS System Security Guide 8.0, 'Security policy language'.")
     a("# Once a policy is installed no path can be attached unless an allow_attach")
-    a("# rule names it, and a process may connect only to channels of type default")
-    a("# unless a 'channel connect' rule allows it. Channels inherit the type of")
-    a("# the process that owns them. QSplintNX relies on both properties.")
+    a("# rule names it, and a process may connect to a channel only when a")
+    a("# 'channel connect' rule allows its type to reach that channel's type. A")
+    a("# channel takes its owner's process type unless allow_attach relabels it;")
+    a("# splintd relabels its data and control channels to distinct types so the")
+    a("# two can be governed separately. QSplintNX relies on both properties.")
     a("")
     a("# ---- types ---------------------------------------------------------------")
     for t in _all_types(cfg):
@@ -249,14 +261,18 @@ def generate_policy(cfg: Config, base_types: set[str] | None = None) -> str:
     a("# VERIFY-ON-TARGET: splintd reads /proc/<pid>/exefile of clients")
     a("# (src/qnx/clientinfo.c); check secpolgenerate output for any extra")
     a("# ability that needs.")
-    L.extend(_ability_block(cfg.splintd_type, cfg.nonroot))
-    a("# Control node used by splintctl. splintd attaches it on its OWN channel,")
-    a("# typed splint_ctl_t via the optional channel-type field of allow_attach,")
-    a("# so the control channel is isolated from the public device channels.")
-    a(f"allow_attach {cfg.splintd_type} {cfg.ctl_path} splint_ctl_t;")
+    L.extend(_ability_block(cfg.splintd_type, cfg.nonroot,
+                            extra=["settypeid:splint_data_t", "settypeid:splint_ctl_t"]))
+    a("# The public device nodes share one dispatch channel, typed splint_data_t")
+    a("# via the optional channel-type field of allow_attach. Clients connect to")
+    a("# splint_data_t, never to splintd's process type.")
     for m in cfg.mappings:
         a(f"# Public path of {m.driver_type} ({m.mode} mapping): clients resolve here.")
-        a(f"allow_attach {cfg.splintd_type} {m.public};")
+        a(f"allow_attach {cfg.splintd_type} {m.public} splint_data_t;")
+    a("# Control node used by splintctl. splintd attaches it on a SEPARATE channel,")
+    a("# typed splint_ctl_t, so the control channel is isolated from the public")
+    a("# device channels and only splintctl may connect to it.")
+    a(f"allow_attach {cfg.splintd_type} {cfg.ctl_path} splint_ctl_t;")
     a("")
 
     for m in cfg.mappings:
@@ -279,9 +295,10 @@ def generate_policy(cfg: Config, base_types: set[str] | None = None) -> str:
         a("# ConnectAttach() to the driver's channel, fails with a permission error.")
         a(f"allow {cfg.splintd_type} {m.driver_type}:channel connect;")
         if m.clients:
-            a(f"# Clients allowed to use {m.public} connect to splintd, never to the driver.")
+            a(f"# Clients allowed to use {m.public} connect to the data channel")
+            a("# (splint_data_t), never to the driver and never to the control channel.")
             for c in m.clients:
-                a(f"allow {c} {cfg.splintd_type}:channel connect;")
+                a(f"allow {c} splint_data_t:channel connect;")
         else:
             a(f"# No client types listed for {m.public}.")
         a("")
