@@ -24,6 +24,29 @@ through `splintd` to the driver. (The first on-target bug was here: the QNX
 connect `ioflag` had to be translated to POSIX open flags, otherwise the backend
 `open()` failed with EACCES.)
 
+The run above uses relocated mode: the driver sits on a hidden backend path and
+`splintd` owns the public name. Shadow mode is the other way to interpose, and it
+needs no change to where the driver is attached. The driver keeps its original
+public path `/dev/vendor_can`; `splintd` attaches the SAME path with
+`_RESMGR_FLAG_BEFORE` so it resolves first, and forwards by opening that path
+itself, returning ENOENT for its own pid so the open falls through to the driver
+behind it (`src/qnx/interpose.c`). On target (`demo/run_shadow.sh`):
+
+    driver:  vendor_can -p /dev/vendor_can          (original path, no move)
+    splintd: splintd -s /dev/vendor_can ...         (same path, attached BEFORE)
+    -> ls -l /dev/vendor_can now resolves to splintd, /dev/splint/ctl appears
+    can_client -p /dev/vendor_can -n 100 -> sent=100 errors=0   (through the shadow)
+
+With the one-line patch loaded live the replayed attack is blocked and the driver
+stays up, `forward errors 0`:
+
+    splintctl reload cve-demo-0042.rules -> OK: rules activated
+    exploit  -> TRIGGER: blocked (errno=1, Operation not permitted)   (exit 0)
+    can_client -n 50 -> sent=50 errors=0   (driver still serving, filters intact)
+
+So the same inspection and live patching work whether `splintd` is dropped in on
+a relocated backend or shadowed onto an existing device node.
+
 ## The bug, unpatched
 
 With an empty ruleset the oversized SET_FILTER reaches the driver and crashes it:
@@ -57,17 +80,33 @@ The deciding step for the blocked message took **1051 ns** (the `lat` field
 above): the cost of running one message past the ruleset.
 
 `bench_ipc` measured the end-to-end per-message cost, direct to the driver versus
-through `splintd` (20000 iterations, `cycles_per_sec=3044152618`):
+through `splintd`, 100000 timed calls per series at SCHED_FIFO priority 20
+(`cycles_per_sec=3040618666`). It reports the full distribution, not just the
+median, because a filter that matters for safety is judged by its tail. Idle box:
 
-| op          | direct p50 | via splintd p50 | overhead p50 |
-|-------------|-----------:|----------------:|-------------:|
-| get_status  |    4405 ns |        36224 ns |   +31819 ns  |
-| set_filter  |    3732 ns |        36498 ns |   +32766 ns  |
+| op          | direct p50 | via splintd p50 | overhead p50 | overhead p99 | overhead min |
+|-------------|-----------:|----------------:|-------------:|-------------:|-------------:|
+| get_status  |    3652 ns |        41013 ns |    +37361 ns |   +145928 ns |     +7656 ns |
+| set_filter  |    3705 ns |        40665 ns |    +36960 ns |   +144076 ns |     +7673 ns |
 
-So under QEMU/KVM `splintd` adds about 32 us per message at the median, of which
-the decision is ~1 us and the rest is the extra IPC hop to the backend. On real
-hardware the IPC hop is far cheaper; these numbers are the emulated figures and
-should be re-measured on a board before being quoted as hardware results.
+Then the same measurement with a second client flooding `splintd` at full rate
+during the run, to read the tail under contention rather than on a quiet box:
+
+| op          | via splintd p50 | overhead p50 | overhead p99 | overhead min |
+|-------------|----------------:|-------------:|-------------:|-------------:|
+| get_status  |        49995 ns |    +46262 ns |   +206579 ns |     +7709 ns |
+| set_filter  |        51463 ns |    +47627 ns |   +208878 ns |     +7563 ns |
+
+So under QEMU/KVM `splintd` adds about 37 us per message at the median on an idle
+box and about 47 us under a saturating second client; the 99th percentile of the
+overhead sits near 145 us idle and near 207 us under load. The structural floor
+is the `min` column, about 7.6 us, which is one extra IPC round trip and does not
+move under load; the decision itself is ~1 us (the `lat` field above). Both
+series completed with zero failed calls, and the flood did not starve the
+measured client. The large `max` values this run produced (single-digit
+milliseconds) are host scheduling outliers under emulation, not time spent in
+`splintd`. The IPC hop is far cheaper on real silicon, so these are emulated
+figures: re-measure on a board before quoting any of them as hardware results.
 
 ## secpol closes the bypass (spike S2)
 
@@ -160,9 +199,12 @@ traffic:
 
 ## Reproducing
 
-`demo/run_demo.sh` runs the whole sequence on the target (steps 1-7 above, and
-step 8, the bypass check, when `SECPOL=1`). The transcript in this document is
-its output on the secure image.
+`demo/run_demo.sh` runs the whole sequence on the target (steps 1-7 above, the
+S2 bypass check at step 8 and the control-channel isolation check at step 9 when
+`SECPOL=1`). `demo/run_shadow.sh` runs the shadow-mode interposition, and
+`demo/run_bench.sh` runs the latency benchmark (`LOAD=1` adds a background flood,
+`SECPOL=1` reports absolute through-splintd latency on the secure image). The
+transcripts in this document are their output on the secure image.
 
 Notes from this develop-mode run, to tighten in a full `--secpol=secure` policy:
 `secpolgenerate` logged two uncovered accesses that develop mode allowed and a
