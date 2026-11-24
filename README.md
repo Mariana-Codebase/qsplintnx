@@ -23,6 +23,31 @@ security policy (secpol) grants `channel connect` to the driver's channel
 only to `splintd`'s type, so no other process can reach the driver except
 through `splintd`; that is what closes the bypass.
 
+```mermaid
+flowchart LR
+    app["CAN client<br/>can_client_t"]
+    bad["attacker<br/>exploit_t"]
+    ctl["splintctl<br/>splintctl_t"]
+    D{"splintd<br/>decide per message"}
+    drv["vendor_can driver<br/>vendor_can_t"]
+    rej["error reply<br/>EPERM"]
+
+    app -->|"/dev/vendor_can · splint_data_t"| D
+    bad -->|"/dev/vendor_can · splint_data_t"| D
+    ctl -->|"/dev/splint/ctl · splint_ctl_t"| D
+    D -->|ALLOW| drv
+    D -->|BLOCK| rej
+    drv -->|reply| D
+```
+
+The device clients and the control client reach `splintd` over two separate,
+separately typed channels: `splint_data_t` carries `open`/`read`/`write`/`devctl`
+for the protected device, `splint_ctl_t` carries only control traffic from
+`splintctl` (reload, stats, events). secpol lets device clients connect to the
+first and only `splintctl` to the second, and it lets only `splintd` connect to
+the driver's own `vendor_can_t` channel. A client that tries the driver path
+directly, or tries the control channel, is refused by the kernel at the connect.
+
 Inspection is stateless and per-message: each message is judged on its own
 operation, devctl code, declared-versus-actual length and fixed-offset
 payload fields. This catches the classic length-confusion, bad-command and
@@ -35,10 +60,13 @@ expressions, so the worst-case cost of checking one message is bounded. On
 a real-time system that bound matters as much as the block itself. On a QNX
 8.0 x86_64 target under QEMU/KVM, deciding one message (the step that blocks
 a known-bad devctl) took about 1 microsecond, and `bench/bench_ipc` put the
-end-to-end overhead `splintd` adds at roughly 32 microseconds per message at
-the median, nearly all of it the extra IPC hop to the backend rather than the
-decision. Those are emulated figures; see `docs/qemu-validation.md` for the
-full run, and re-measure on a board before quoting them as hardware numbers.
+end-to-end overhead `splintd` adds at roughly 37 microseconds per message at
+the median on an idle box, rising to about 47 with a second client saturating
+it; the 99th percentile sat near 145 and 207 microseconds. Nearly all of that
+is the extra IPC hop to the backend rather than the decision, and the floor is
+one round trip (~7.6 microseconds) that does not move under load. Those are
+emulated figures; see `docs/qemu-validation.md` for the full run, and re-measure
+on a board before quoting them as hardware numbers.
 
 ## Status
 
@@ -56,9 +84,11 @@ on a QEMU target as the SDK is installed.
     tools/splintctl/  control client (reload, stats, events, learn-dump)
     tools/secpolgen/  generate the secpol policy that closes the bypass
     bench/            host engine benchmark and on-target IPC benchmark
-    demo/             vendor driver scenario, clients, rules, run script
+    demo/             vendor driver scenario, clients, rules, run scripts
     docs/RULES.md     the rule language, normative
     docs/PLAN.md      development plan and on-target spikes
+    docs/qemu-validation.md   the full on-target run (forwarding, patch,
+                              shadow mode, latency, secpol bypass + isolation)
 
 ## Build
 
@@ -72,6 +102,37 @@ QNX (after installing QNX SDP 8.0 and sourcing its environment):
 
     source ~/qnx800/qnxsdp-env.sh
     make qnx
+
+This builds `splintd`, `splintctl`, `bench_ipc` and the demo driver and clients
+for `gcc_ntox86_64`.
+
+## Run it on QNX
+
+The whole demo runs on a QEMU target built from the SDP, so it reproduces without
+hardware. The steps:
+
+1. Generate the security policy from the scenario config and build an image with
+   it. `secpolgen` turns a small JSON description of `splintd`, its control client
+   and the driver mappings into the secpol policy that types the channels and
+   closes the bypass:
+
+        python3 tools/secpolgen/secpolgen.py tools/secpolgen/example.json \
+            -o demo/secpol/qsplint.secpol
+        mkqnximage --secpol=develop --policy=demo/secpol/qsplint.secpol --clean
+
+2. Boot the image under QEMU (KVM if available) and copy the binaries, rules and
+   `demo/*.sh` onto the target (the demo uses a FAT payload drive; any transport
+   works).
+
+3. Run the scenarios on the target:
+
+        SECPOL=1 ./run_demo.sh      # forward, crash unpatched, patch live, block,
+                                    # then the S2 bypass and control-channel checks
+        ./run_shadow.sh             # same-path interposition (_RESMGR_FLAG_BEFORE)
+        LOAD=1 ./run_bench.sh       # per-message min/p50/p99/max, under a flood
+
+`docs/qemu-validation.md` is the transcript of exactly these runs on the secure
+image, including the secpol denials logged by the kernel.
 
 ## License
 
