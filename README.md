@@ -56,17 +56,21 @@ protocol sequences across many messages, and it does not see data a client
 moves out of band through shared memory; those are out of scope.
 
 The rule language is deliberately small, with no loops and no regular
-expressions, so the worst-case cost of checking one message is bounded. On
-a real-time system that bound matters as much as the block itself. On a QNX
-8.0 x86_64 target under QEMU/KVM, deciding one message (the step that blocks
-a known-bad devctl) took about 1 microsecond, and `bench/bench_ipc` put the
-end-to-end overhead `splintd` adds at roughly 37 microseconds per message at
-the median on an idle box, rising to about 47 with a second client saturating
-it; the 99th percentile sat near 145 and 207 microseconds. Nearly all of that
-is the extra IPC hop to the backend rather than the decision, and the floor is
-one round trip (~7.6 microseconds) that does not move under load. Those are
-emulated figures; see `docs/qemu-validation.md` for the full run, and re-measure
-on a board before quoting them as hardware numbers.
+expressions, so the number of comparisons needed to check one message is
+bounded. That bounds the rule-evaluation cost; it is not by itself a hard
+real-time latency guarantee, since the rate limiter takes a short lock and
+every allowed message waits on backend I/O, both of which depend on scheduling
+and contention. On a QNX 8.0 x86_64 target under QEMU/KVM, deciding one message
+(the step that blocks a known-bad devctl) took about 1 microsecond, and
+`bench/bench_ipc` put the median cost `splintd` adds at roughly 37 microseconds
+per message on an idle box, rising to about 47 with a second client saturating
+it; the gap between the two paths' 99th percentile sat near 145 and 207
+microseconds. Nearly all of that is the extra IPC hop to the backend rather than
+the decision, and the floor is one round trip (~7.6 microseconds) that does not
+move under load. Those are emulated figures; see `docs/qemu-validation.md` for
+the full run, including why the percentile differences are not the percentiles
+of per-request overhead, and re-measure on a board before quoting them as
+hardware numbers.
 
 ## Status
 

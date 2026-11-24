@@ -44,19 +44,29 @@ paths and type names outside `[A-Za-z_][A-Za-z0-9_]*` are rejected.
 The rules rely on two properties that the "Security policy language"
 page of the QNX OS System Security Guide 8.0 states: once a policy is
 installed a path that no `allow_attach` rule names cannot be attached,
-and a process may only connect to channels of type `default` unless a
-`channel connect` rule allows it. A channel takes the type of the
-process that owns it, so the driver's channel has the driver's type.
+and a process may connect to a channel only when a `channel connect`
+rule allows its type to reach that channel's type. A channel takes the
+type of the process that owns it unless `allow_attach` relabels it with
+its optional third field; relabeling to a type other than the process
+type needs the `settypeid` ability. `splintd` relabels its data and
+control channels to distinct types so the two can be governed
+separately.
 
 | Rule | Purpose |
 |------|---------|
-| `type ...;` | one type per process role |
-| `allow splintd_t self:ability { pathspace public_channel };` | splintd is a resource manager |
-| `allow_attach splintd_t <public>;`, `allow_attach splintd_t <ctl>;` | splintd owns the public paths and its control node |
+| `type ...;` | one type per process role, plus `splint_data_t` and `splint_ctl_t` for splintd's channels |
+| `allow splintd_t self:ability { pathspace public_channel settypeid:splint_data_t settypeid:splint_ctl_t };` | splintd is a resource manager and relabels its two channels |
+| `allow_attach splintd_t <public> splint_data_t;` | the public device nodes share one channel, typed `splint_data_t` |
+| `allow_attach splintd_t <ctl> splint_ctl_t;` | the control node is on a SEPARATE channel, typed `splint_ctl_t` |
 | `allow_attach <driver_t> <backend>;` | only the driver may attach the hidden path |
 | `allow splintd_t <driver_t>:channel connect;` | only splintd may talk to the driver |
-| `allow <client_t> splintd_t:channel connect;` | listed clients talk to splintd |
-| `allow splintctl_t splintd_t:channel connect;` | the control client talks to splintd |
+| `allow <client_t> splint_data_t:channel connect;` | listed clients reach only the data channel |
+| `allow splintctl_t splint_ctl_t:channel connect;` | only the control client reaches the control channel |
+
+Because the data and control channels carry different types, a client of
+a protected device cannot connect to the control node at all: the kernel
+refuses the connect, so `splintd` never has to decide whether to trust a
+control command from a device client.
 
 The output is a fragment, not a bootable policy. A `--secpol=secure`
 image needs types and rules for every service in it (mkqnximage refuses
@@ -83,30 +93,28 @@ produce exactly such rules, which is why they are errors by default
 `--check-bypass` writes a `/bin/sh` script for the target. For each
 relocated mapping it runs `on -T <client_t> sh -c ': < <backend>'` and
 expects a permission error, and opens the public path the same way as
-a control. It prints PASS/FAIL per check and exits with the number of
-failures. Shadow mappings are skipped because their backend shares the
-public path; testing them needs a small program that calls
-`ConnectAttach()` on the driver's channel directly.
-
-## Known limitation
-
-The control node and the public paths are attached on splintd's single
-channel, so every type allowed to use a protected device can also
-connect to `/dev/splint/ctl` at the channel level, and splintd itself
-has to refuse control commands from them. Real separation needs a second
-channel for the control node, typed with the optional third argument of
-`allow_attach` (`allow_attach splintd_t /dev/splint/ctl splint_ctl_t;`)
-and opened only to `splintctl_t`. The generator prints this as a
-comment; it does not emit the rule because splintd does not create that
-channel. The bypass script reports the ctl open as INFO.
+a control. It also checks the isolated control channel: a device
+client's type opening `/dev/splint/ctl` must be denied, and the control
+client's type must be allowed. It prints PASS/FAIL per check and exits
+with the number of failures. Shadow mappings skip the backend-path check
+because their backend shares the public path; testing those needs a
+small program that calls `ConnectAttach()` on the driver's channel
+directly.
 
 ## VERIFY-ON-TARGET
 
-* Whether `allow_attach` alone is enough for splintd, or whether
-  `pathspace` is also needed (both are emitted).
+These were open questions during development; the run recorded in
+`docs/qemu-validation.md` resolved them on a develop-mode image.
+
+* Relabeling a channel to a non-process type needs the `settypeid`
+  ability, and `secpolcompile` rejects a connect to a process type that
+  can be relabeled. That is why the data channel carries its own
+  `splint_data_t` rather than `splintd_t`; both are confirmed by
+  compiling the generated policy with the SDP 8.0 `secpolcompile`.
+* `on -T` from the shell needs the `settypeid` ability, and the denial
+  surfaces both as `open(...): Operation not permitted` and as a
+  `secpolgenerate` log line naming the refused `channel_connect`.
 * Extra abilities splintd needs to read `/proc/<pid>/exefile` of its
-  clients.
-* That `on -T` works from the shell used for the test (it needs the
-  `settypeid` ability), and the exact error text the shell prints.
-* That `secpolcompile` accepts the fragment merged with the generated
-  base policy.
+  clients, and `splintctl_t` reading the rules file off the data
+  filesystem, still show up as develop-mode `secpolgenerate` entries to
+  grant explicitly in a full `--secpol=secure` policy.

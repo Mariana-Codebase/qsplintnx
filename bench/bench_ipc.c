@@ -258,14 +258,20 @@ int main(int argc, char **argv)
         rc = 1;
     }
 
-    printf("\n# overhead of splintd (public - backend), ns\n");
+    /* These columns subtract the two paths' percentiles (public minus
+     * backend). They are the difference between, say, the public p99 and the
+     * backend p99, NOT the p99 of the per-request overhead: the two series run
+     * at different times, so a request cannot be paired with a matching direct
+     * call to form a true per-request delta. Read them as "how much higher the
+     * public path's p99 is", not "the 99th percentile of what splintd adds". */
+    printf("\n# per-path percentile difference (public - backend), ns\n");
     for (int o = 0; o < OP_COUNT; o++) {
         const series_t *a = &ser[0][o], *b = &ser[1][o];
         if (!a->valid || !b->valid) {
             printf("# %-10s n/a (need both series)\n", op_names[o]);
             continue;
         }
-        printf("# %-10s min %+" PRId64 "  p50 %+" PRId64 "  p99 %+" PRId64 "  max %+" PRId64 "\n",
+        printf("# %-10s dmin %+" PRId64 "  dp50 %+" PRId64 "  dp99 %+" PRId64 "  dmax %+" PRId64 "\n",
                op_names[o],
                (int64_t)b->ns[0] - (int64_t)a->ns[0],
                (int64_t)pct(b, 50.0) - (int64_t)pct(a, 50.0),

@@ -84,29 +84,43 @@ through `splintd`, 100000 timed calls per series at SCHED_FIFO priority 20
 (`cycles_per_sec=3040618666`). It reports the full distribution, not just the
 median, because a filter that matters for safety is judged by its tail. Idle box:
 
-| op          | direct p50 | via splintd p50 | overhead p50 | overhead p99 | overhead min |
-|-------------|-----------:|----------------:|-------------:|-------------:|-------------:|
-| get_status  |    3652 ns |        41013 ns |    +37361 ns |   +145928 ns |     +7656 ns |
-| set_filter  |    3705 ns |        40665 ns |    +36960 ns |   +144076 ns |     +7673 ns |
+| op          | direct p50 | via splintd p50 | Δp50 | Δp99 | Δmin |
+|-------------|-----------:|----------------:|-----:|-----:|-----:|
+| get_status  |    3652 ns |        41013 ns | +37361 ns | +145928 ns | +7656 ns |
+| set_filter  |    3705 ns |        40665 ns | +36960 ns | +144076 ns | +7673 ns |
 
 Then the same measurement with a second client flooding `splintd` at full rate
 during the run, to read the tail under contention rather than on a quiet box:
 
-| op          | via splintd p50 | overhead p50 | overhead p99 | overhead min |
-|-------------|----------------:|-------------:|-------------:|-------------:|
-| get_status  |        49995 ns |    +46262 ns |   +206579 ns |     +7709 ns |
-| set_filter  |        51463 ns |    +47627 ns |   +208878 ns |     +7563 ns |
+| op          | via splintd p50 | Δp50 | Δp99 | Δmin |
+|-------------|----------------:|-----:|-----:|-----:|
+| get_status  |        49995 ns | +46262 ns | +206579 ns | +7709 ns |
+| set_filter  |        51463 ns | +47627 ns | +208878 ns | +7563 ns |
+
+The Δ columns subtract the two paths' percentiles (via splintd minus direct).
+They are a difference between percentiles, for example the public p99 minus the
+backend p99, not the 99th percentile of the per-request overhead: the direct and
+through-`splintd` series run at different times, so a request cannot be paired
+with a matching direct call to form a true per-request delta. Read Δp99 as "the
+public path's p99 is this much higher", not "99% of the overhead is below this".
 
 So under QEMU/KVM `splintd` adds about 37 us per message at the median on an idle
-box and about 47 us under a saturating second client; the 99th percentile of the
-overhead sits near 145 us idle and near 207 us under load. The structural floor
-is the `min` column, about 7.6 us, which is one extra IPC round trip and does not
+box and about 47 us under a saturating second client; the gap between the two
+paths' p99 sits near 145 us idle and near 207 us under load. The structural floor
+is the `Δmin` column, about 7.6 us, which is one extra IPC round trip and does not
 move under load; the decision itself is ~1 us (the `lat` field above). Both
 series completed with zero failed calls, and the flood did not starve the
 measured client. The large `max` values this run produced (single-digit
 milliseconds) are host scheduling outliers under emulation, not time spent in
 `splintd`. The IPC hop is far cheaper on real silicon, so these are emulated
 figures: re-measure on a board before quoting any of them as hardware results.
+
+These figures bound the number of rule comparisons per message, which the small
+grammar keeps constant, but they are not a hard real-time guarantee. The rate
+limiter takes a short test-and-set spinlock, and every allowed message waits on
+backend I/O; both add time that depends on scheduling and contention, beyond the
+rule-evaluation cost. A worst-case latency claim for a real-time deadline needs
+separate analysis of those waits on the target hardware.
 
 ## secpol closes the bypass (spike S2)
 
