@@ -22,6 +22,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <string.h>
 #include <unistd.h>
 #include <devctl.h>
 
@@ -136,17 +137,26 @@ off_t splintd_backend_lseek(splintd_ocb_t *ocb, off_t off, int whence)
 
 /*
  * Forward a devctl to the backend. devctl() uses one buffer for both the TO
- * and FROM data, so we size the transfer at buf_cap = max(in_len, reply cap,
- * command size hint). devctl() returns EOK or an errno (it does not use the
- * -1/errno convention) and may retry on EINTR by returning EINTR itself.
+ * and FROM data, so the transfer is sized at buf_cap = max(in_len, reply cap,
+ * command size hint). Only the first in_len bytes were delivered by the client
+ * and inspected by the engine; buf is a reused scratch buffer, so anything
+ * past in_len still holds bytes from a previous request. Those bytes must not
+ * reach the driver: a FROM/TO command whose size hint or reply capacity makes
+ * buf_cap exceed in_len would otherwise forward uninspected data that no rule
+ * ever saw. Zero the tail so the driver sees exactly the inspected input
+ * followed by defined zero padding.
+ * devctl() returns EOK or an errno (it does not use the -1/errno convention)
+ * and may retry on EINTR by returning EINTR itself.
  * https://www.qnx.com/developers/docs/8.0/com.qnx.doc.neutrino.lib_ref/topic/d/devctl.html
  */
 int splintd_backend_devctl(splintd_ocb_t *ocb, int dcmd, void *buf,
                            size_t in_len, size_t buf_cap, int *ret_val)
 {
-    (void)in_len;                      /* devctl transfers up to buf_cap bytes */
     if (ocb->backend_fd < 0)
         return EBADF;
+
+    if (buf_cap > in_len)
+        memset((unsigned char *)buf + in_len, 0, buf_cap - in_len);
 
     int info = 0;
     int r;

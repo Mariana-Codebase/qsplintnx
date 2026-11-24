@@ -134,12 +134,35 @@ static _Thread_local splintd_pending_open_t tls_pending;
  * carry over unchanged. */
 static int splintd_ioflag_to_oflag(unsigned ioflag)
 {
+    /* QNX connect ioflag: only the low two bits are transformed, carrying the
+     * access mode offset by one from POSIX (_IO_FLAG_RD/_IO_FLAG_WR). The SDP
+     * 8.0 _io_connect reference states the remaining bits are left unmodified,
+     * so the open status flags (O_APPEND, O_NONBLOCK, O_SYNC, ...) sit at their
+     * native POSIX positions. Translate the access mode and carry those status
+     * flags through, so a client that opened the device non-blocking (or
+     * append, or sync) gets the same behaviour on the backend fd. The earlier
+     * version returned the access mode only and silently dropped them. */
     unsigned rw = ioflag & (_IO_FLAG_RD | _IO_FLAG_WR);
+    int oflag;
     if (rw == (_IO_FLAG_RD | _IO_FLAG_WR))
-        return O_RDWR;
-    if (rw == _IO_FLAG_WR)
-        return O_WRONLY;
-    return O_RDONLY;   /* _IO_FLAG_RD or none */
+        oflag = O_RDWR;
+    else if (rw == _IO_FLAG_WR)
+        oflag = O_WRONLY;
+    else
+        oflag = O_RDONLY;              /* _IO_FLAG_RD or none */
+
+    unsigned pass = (unsigned)(O_APPEND | O_NONBLOCK | O_SYNC);
+#ifdef O_DSYNC
+    pass |= (unsigned)O_DSYNC;
+#endif
+#ifdef O_RSYNC
+    pass |= (unsigned)O_RSYNC;
+#endif
+#ifdef O_LARGEFILE
+    pass |= (unsigned)O_LARGEFILE;
+#endif
+    oflag |= (int)(ioflag & pass);
+    return oflag;
 }
 
 IOFUNC_OCB_T *splintd_ocb_calloc(resmgr_context_t *ctp, IOFUNC_ATTR_T *attr)
