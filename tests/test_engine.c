@@ -662,6 +662,55 @@ static void test_hot_swap_mt(void)
     splint_engine_free(e);
 }
 
+/* maxlen on an allow line must bound the operation's data size. A read has no
+ * inbound payload (len == 0) and its size lives in declared; a write/devctl is
+ * bounded by the inbound payload (len). Regression for the report that
+ * `allow read maxlen 512` passed a 64 KiB request because it checked len. */
+static void test_read_maxlen(void)
+{
+    splint_engine_t *e = splint_engine_new();
+    splint_ruleset_t *rs = rs_new();
+    splint_profile_t *pf = add_profile(rs, PATH, true);  /* default block */
+    splint_allow_t *a;
+
+    a = add_allow(pf, SPLINT_OP_READ);
+    a->has_maxlen = true; a->maxlen = 512;
+    a = add_allow(pf, SPLINT_OP_WRITE);
+    a->has_maxlen = true; a->maxlen = 512;
+    splint_engine_set_rules(e, rs);
+
+    splint_msg_t m;
+    splint_verdict_t v;
+
+    /* read shape from io_read: declared = requested bytes, len = 0 */
+    memset(&m, 0, sizeof m);
+    m.op = SPLINT_OP_READ; m.path = PATH; m.client = &cl_good; m.now_ns = NS;
+    m.declared = 512; m.len = 0;
+    v = run(e, &m);
+    CHECK(v.action == SPLINT_ALLOW);           /* exactly at the limit */
+
+    m.declared = 513; m.len = 0;
+    v = run(e, &m);
+    CHECK(v.action == SPLINT_BLOCK);           /* one over */
+
+    m.declared = 65536; m.len = 0;             /* the reported case */
+    v = run(e, &m);
+    CHECK(v.action == SPLINT_BLOCK && v.reason == SPLINT_R_DEFAULT);
+
+    /* write shape: maxlen bounds the real inbound payload (len) */
+    memset(&m, 0, sizeof m);
+    m.op = SPLINT_OP_WRITE; m.path = PATH; m.client = &cl_good; m.now_ns = NS;
+    m.declared = 0; m.len = 1000;
+    v = run(e, &m);
+    CHECK(v.action == SPLINT_BLOCK);
+
+    m.declared = 999999; m.len = 10;           /* lying claim, small payload */
+    v = run(e, &m);
+    CHECK(v.action == SPLINT_ALLOW);           /* bounded by the real 10 bytes */
+
+    splint_engine_free(e);
+}
+
 int main(void)
 {
     test_null_ruleset();
@@ -669,6 +718,7 @@ int main(void)
     test_patch_matching();
     test_log_only_patch();
     test_profile();
+    test_read_maxlen();
     test_rate();
     test_learn_mode();
     test_stats();

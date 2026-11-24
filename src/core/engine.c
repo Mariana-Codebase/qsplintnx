@@ -242,6 +242,19 @@ static bool patch_match(const splint_patch_t *p, const splint_msg_t *m)
     return true;
 }
 
+/* The length that `maxlen` bounds depends on the operation. A read carries no
+ * inbound payload (m->len is 0); the size that matters is how many bytes the
+ * client asked to receive, which the QNX handler records in m->declared. A
+ * write or devctl is bounded by the inbound payload actually delivered
+ * (m->len); a devctl's declared nbytes also sizes the reply buffer, so it is
+ * not the inbound length and must not be bounded here. Returning m->len for a
+ * read would let `allow read maxlen N` pass any request size, since m->len is
+ * always 0 for reads. */
+static uint64_t splint_effective_len(const splint_msg_t *m)
+{
+    return (m->op == SPLINT_OP_READ) ? m->declared : m->len;
+}
+
 static bool allow_match(const splint_allow_t *a, const splint_msg_t *m,
                         const char *cname)
 {
@@ -257,7 +270,7 @@ static bool allow_match(const splint_allow_t *a, const splint_msg_t *m,
     }
     if (a->has_client && (!cname || strcmp(a->client, cname) != 0))
         return false;
-    if (a->has_maxlen && m->len > a->maxlen)
+    if (a->has_maxlen && splint_effective_len(m) > a->maxlen)
         return false;
     return true;
 }
