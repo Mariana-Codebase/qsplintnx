@@ -47,6 +47,36 @@ stays up, `forward errors 0`:
 So the same inspection and live patching work whether `splintd` is dropped in on
 a relocated backend or shadowed onto an existing device node.
 
+## Forwarding integrity: the driver gets exactly the inspected bytes
+
+`splintd` reads the client's input into a reused per-thread buffer, then forwards
+a devctl to the driver sized at `buf_cap = max(in_len, reply capacity, dcmd size
+hint)`. `SET_FILTER` is declared with a 64-byte data type, so its size hint is 64
+and `splintd` forwards a 64-byte devctl even when the client sent fewer bytes; the
+driver copies all 64 into its filter table. If the bytes past the client's input
+were left as whatever the buffer held from a previous request, data no rule
+inspected would reach the driver. `splintd` now zeroes that tail before
+forwarding.
+
+`demo/clients/fwdtest.c` checks this on target through `splintd`: it primes the
+table with 0xAA over 40 bytes, sends an 8-byte 0xBB `SET_FILTER`, then reads the
+table back with `GET_FILTER` and requires the tail `[8..64)` to be zero.
+
+    fwdtest (fixed splintd)
+    -> table head[0..8)=bbbbbbbbbbbbbbbb  tail[8..64) nonzero=0
+    -> RESULT: PASS                                            (exit 0)
+
+To show the test actually catches the defect, the same run against a `splintd`
+built with the tail-zeroing removed:
+
+    fwdtest (splintd without the fix)
+    -> table head[0..8)=bbbbbbbbbbbbbbbb  tail[8..64) nonzero=32
+    -> first tail bytes: aa aa aa aa aa aa aa aa aa aa aa aa aa aa aa aa
+    -> RESULT: FAIL (32 uninspected bytes reached the driver)  (exit 1)
+
+Without the fix, 32 bytes of the previous request's 0xAA reached the driver; with
+it, the tail is zero. The full demo run below (steps 1-9) uses the fixed binary.
+
 ## The bug, unpatched
 
 With an empty ruleset the oversized SET_FILTER reaches the driver and crashes it:
