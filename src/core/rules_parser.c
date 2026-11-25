@@ -529,6 +529,7 @@ static int parse_profile(parser_t *p)
 static int parse_file(parser_t *p)
 {
     int have_mode = 0;
+    int have_version = 0;
     advance(p);
     for (;;) {
         skip_newlines(p);
@@ -540,6 +541,17 @@ static int parse_file(parser_t *p)
         } else if (is_kw(p, "profile")) {
             if (parse_profile(p))
                 return -1;
+        } else if (is_kw(p, "version")) {
+            if (have_version)
+                return fail_tok(p, "duplicate 'version' statement");
+            advance(p);
+            if (p->tok.kind != SPLINT_TOK_INT)
+                return fail_tok(p, "expected integer after 'version'");
+            p->rs->version = p->tok.ival;
+            advance(p);
+            if (p->tok.kind != SPLINT_TOK_NEWLINE && p->tok.kind != SPLINT_TOK_EOF)
+                return fail_tok(p, "expected end of statement");
+            have_version = 1;
         } else if (is_kw(p, "mode")) {
             if (have_mode)
                 return fail_tok(p, "duplicate 'mode' statement");
@@ -555,7 +567,7 @@ static int parse_file(parser_t *p)
                 return fail_tok(p, "expected end of statement");
             have_mode = 1;
         } else {
-            return fail_tok(p, "expected 'patch', 'profile' or 'mode'");
+            return fail_tok(p, "expected 'patch', 'profile', 'mode' or 'version'");
         }
     }
 }

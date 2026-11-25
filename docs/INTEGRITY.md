@@ -58,6 +58,30 @@ provenance, refuses a tampered or unsigned one, and keeps the active ruleset:
 
     splintctl stats -> patches 1   (the signed patch is still active)
 
+## Anti-rollback: a signature is not freshness
+
+A valid signature proves a ruleset is authentic, not that it is the current one.
+Without more, an attacker who can write the rules directory could replace the
+active ruleset with an older, still-correctly-signed one, for example to
+reinstate a policy from before a patch was added. QSplintNX closes that with a
+monotonic version: a ruleset may carry `version N` (integrity-protected, since
+the whole file is signed), and `splintd` refuses to activate a ruleset that does
+not advance the highest version it has seen. Once a versioned ruleset is active,
+an unversioned one is refused too.
+
+    splintctl reload patch-v2.rules   (version 2, signed)  -> OK
+    splintctl reload patch-v1.rules   (version 1, signed)
+    -> rollback refused: version 1 is not newer than active 2
+    -> reload not applied; the previous ruleset is still active
+    splintctl reload empty.rules      (unversioned, signed)
+    -> rollback refused: unversioned ruleset while version 2 is active
+    splintctl reload patch-v3.rules   (version 3, signed)  -> OK
+
+The counter lives in the daemon for its lifetime. Persisting it across restarts
+so a reboot cannot reset it needs rollback-resistant storage (a monotonic
+counter in secure hardware, or a replay-protected file); that is the honest next
+step, noted rather than claimed.
+
 ## Authorship as part of the binary
 
 Beyond provenance of rulesets, the project's own identity is built in. Every

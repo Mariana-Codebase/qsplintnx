@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+# Signed, versioned ruleset for the anti-rollback demo.
+version 2
+patch CVE-DEMO-0042 {
+  path   /dev/vendor_can
+  match  devctl 0x0505
+  when   len > 64
+  action block, log
+}

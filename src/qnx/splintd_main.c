@@ -71,6 +71,13 @@ volatile uint32_t g_active_nprofile = 0;
  * the ruleset, metrics and learn state move together. */
 static pthread_mutex_t g_load_lock = PTHREAD_MUTEX_INITIALIZER;
 
+/* Highest ruleset version activated so far (anti-rollback). Guarded by
+ * g_load_lock. A versioned ruleset (version > 0) is accepted only if its
+ * version exceeds this; once any versioned ruleset is active, an older or
+ * unversioned one is refused. Resets on restart -- persisting it across reboots
+ * needs rollback-resistant storage and is noted as future work. */
+static uint64_t g_active_version = 0;
+
 /* Connect/IO tables and the OCB mount, shared by every mapping. */
 static resmgr_connect_funcs_t g_cf;
 static resmgr_io_funcs_t      g_io;
@@ -211,6 +218,7 @@ int splintd_load_rules(const char *path, splint_parse_error_t *err)
     uint32_t mode     = (uint32_t)rs->mode;
     uint32_t npatch   = rs->npatch;
     uint32_t nprofile = rs->nprofile;
+    uint64_t version  = rs->version;
 
     /*
      * Commit the activation as one transition. g_load_lock serialises writers so
@@ -223,6 +231,26 @@ int splintd_load_rules(const char *path, splint_parse_error_t *err)
      * of a false success.
      */
     pthread_mutex_lock(&g_load_lock);
+
+    /* Anti-rollback. The version lives inside the signed ruleset, so it is
+     * integrity-protected. Once a versioned ruleset is active, refuse any
+     * ruleset that does not advance the version, including an unversioned one:
+     * a valid signature proves authenticity, not that the policy is current. */
+    if (g_active_version > 0 && version <= g_active_version) {
+        pthread_mutex_unlock(&g_load_lock);
+        if (err != NULL) {
+            if (version == 0)
+                snprintf(err->msg, sizeof err->msg,
+                         "rollback refused: unversioned ruleset while version %llu is active",
+                         (unsigned long long)g_active_version);
+            else
+                snprintf(err->msg, sizeof err->msg,
+                         "rollback refused: version %llu is not newer than active %llu",
+                         (unsigned long long)version, (unsigned long long)g_active_version);
+        }
+        free(rs);
+        return -1;
+    }
 
     if (splint_engine_set_rules(g_splintd.engine, rs) != 0) {   /* takes ownership of rs */
         pthread_mutex_unlock(&g_load_lock);
@@ -258,6 +286,8 @@ int splintd_load_rules(const char *path, splint_parse_error_t *err)
     __atomic_store_n(&g_active_mode,     mode,     __ATOMIC_RELAXED);
     __atomic_store_n(&g_active_npatch,   npatch,   __ATOMIC_RELAXED);
     __atomic_store_n(&g_active_nprofile, nprofile, __ATOMIC_RELAXED);
+    if (version > g_active_version)
+        g_active_version = version;    /* ratchet forward; never decreases */
 
     pthread_mutex_unlock(&g_load_lock);
     return 0;

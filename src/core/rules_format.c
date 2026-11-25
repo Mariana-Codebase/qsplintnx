@@ -187,6 +187,8 @@ size_t splint_rules_format(const splint_ruleset_t *rs, char *buf, size_t cap)
     npatch = rs->npatch < SPLINT_MAX_RULES ? rs->npatch : SPLINT_MAX_RULES;
     nprofile = rs->nprofile < SPLINT_MAX_PROFILES ? rs->nprofile : SPLINT_MAX_PROFILES;
 
+    if (rs->version != 0)
+        put(&o, "version %llu\n", (unsigned long long)rs->version);
     if (rs->mode == SPLINT_MODE_LEARN)
         put(&o, "mode learn\n");
     for (i = 0; i < npatch; i++) {

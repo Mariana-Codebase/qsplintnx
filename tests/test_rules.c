@@ -98,7 +98,8 @@ static int operand_eq(const splint_operand_t *a, const splint_operand_t *b)
 static int ruleset_eq(const splint_ruleset_t *a, const splint_ruleset_t *b)
 {
     uint32_t i, j;
-    if (a->mode != b->mode || a->npatch != b->npatch || a->nprofile != b->nprofile)
+    if (a->mode != b->mode || a->version != b->version ||
+        a->npatch != b->npatch || a->nprofile != b->nprofile)
         return 0;
     for (i = 0; i < a->npatch; i++) {
         const splint_patch_t *x = &a->patch[i], *y = &b->patch[i];
@@ -730,6 +731,38 @@ static void test_format(void)
     CHECK_EQ_U(splint_rules_format(NULL, NULL, 0), 0);
 }
 
+/* The monotonic rollback version parses, defaults to 0, round-trips through the
+ * formatter, and rejects a duplicate statement. */
+static void test_version(void)
+{
+    static const char PATCH[] =
+        "patch P { path /dev/vendor_can\n match devctl 0x0505\n"
+        " when len > 64\n action block }\n";
+    char src[512];
+    splint_ruleset_t *rs;
+
+    rs = PARSE_OK(PATCH);
+    CHECK_EQ_U(rs->version, 0u);                 /* unversioned by default */
+    free(rs);
+
+    snprintf(src, sizeof src, "version 7\nmode enforce\n%s", PATCH);
+    rs = PARSE_OK(src);
+    CHECK_EQ_U(rs->version, 7u);
+    free(rs);
+
+    rs = PARSE_OK("version 1000000\n");          /* version-only file is valid */
+    CHECK_EQ_U(rs->version, 1000000u);
+    free(rs);
+
+    /* round-trip preserves it (ruleset_eq now compares version) */
+    snprintf(src, sizeof src, "version 9\n%s", PATCH);
+    ROUNDTRIP(src);
+
+    splint_ruleset_t *bad = NULL;
+    CHECK(splint_rules_parse("version 1\nversion 2\n", 20, &bad, NULL) == -1);
+    CHECK(splint_rules_parse("version notanumber\n", 19, &bad, NULL) == -1);
+}
+
 int main(void)
 {
     test_rules_md_patch();
@@ -740,5 +773,6 @@ int main(void)
     test_limits();
     test_roundtrip();
     test_format();
+    test_version();
     TEST_MAIN_END();
 }

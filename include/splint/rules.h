@@ -103,6 +103,7 @@ typedef struct splint_profile {
 
 typedef struct splint_ruleset {
     splint_mode_t    mode;
+    uint64_t         version;   /* monotonic rollback counter; 0 == unversioned */
     uint32_t         npatch;
     splint_patch_t   patch[SPLINT_MAX_RULES];
     uint32_t         nprofile;

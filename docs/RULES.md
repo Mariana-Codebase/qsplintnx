@@ -127,6 +127,24 @@ profile /dev/vendor_can {
   forwards everything EXCEPT messages matching a `patch` with `block`.
   Patches always enforce; learning never disables a known virtual patch.
 
+### version
+
+An optional `version N` statement (at most one, `N` a non-negative integer)
+gives the ruleset a monotonic version for rollback protection:
+
+```
+version 7
+```
+
+Because the whole file is signed, the version is integrity-protected. splintd
+tracks the highest version it has activated and refuses to activate a ruleset
+that does not advance it; once any versioned ruleset is active, an unversioned
+one (`version 0`, the default) is also refused. A valid signature proves a
+ruleset is authentic, not that it is current, so the version is what stops an
+authentic but superseded ruleset from being replayed. The counter is in-memory
+per daemon lifetime; persisting it across restarts needs rollback-resistant
+storage and is noted as future work.
+
 ## Evaluation order (engine)
 
 1. Patches whose `path` equals the message path, in file order. First
