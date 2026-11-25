@@ -48,6 +48,15 @@ first and only `splintctl` to the second, and it lets only `splintd` connect to
 the driver's own `vendor_can_t` channel. A client that tries the driver path
 directly, or tries the control channel, is refused by the kernel at the connect.
 
+Because that deny lives in the kernel's secpol and not inside `splintd`, a crash
+of `splintd` cannot re-expose the driver in relocated mode: the public node
+disappears and clients get ENOENT, while the direct-to-driver path stays denied,
+so the failure is closed rather than open. Shadow mode makes the opposite trade
+(the driver keeps its node and stays reachable, unprotected, if `splintd` dies).
+Supervising `splintd` so it respawns turns the outage into a sub-second gap; the
+production mechanism is the QNX High Availability Manager. See
+`docs/AVAILABILITY.md` for the measured crash, denial and recovery behaviour.
+
 Inspection is stateless and per-message: each message is judged on its own
 operation, devctl code, declared-versus-actual length and fixed-offset
 payload fields. This catches the classic length-confusion, bad-command and
@@ -91,6 +100,7 @@ on a QEMU target as the SDK is installed.
     demo/             vendor driver scenario, clients, rules, run scripts
     docs/RULES.md     the rule language, normative
     docs/PLAN.md      development plan and on-target spikes
+    docs/AVAILABILITY.md      what happens to the device when splintd crashes
     docs/qemu-validation.md   the full on-target run (forwarding, patch,
                               shadow mode, latency, secpol bypass + isolation)
 
