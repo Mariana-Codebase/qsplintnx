@@ -76,6 +76,7 @@ qnx:
 	$(QCC) $(QFLAGS) -Idemo/include demo/vendor_can/vendor_can.c -o $(QBUILD)/vendor_can
 	$(QCC) $(QFLAGS) -Idemo/include demo/clients/can_client.c -o $(QBUILD)/can_client
 	$(QCC) $(QFLAGS) -Idemo/include demo/clients/exploit.c -o $(QBUILD)/exploit
+	$(QCC) $(QFLAGS) -Idemo/include demo/clients/fwdtest.c -o $(QBUILD)/fwdtest
 	$(QCC) $(QFLAGS) -Idemo/include bench/bench_ipc.c -o $(QBUILD)/bench_ipc
 	@echo "QNX binaries in $(QBUILD)"
 

@@ -115,6 +115,14 @@ static int vcan_devctl(resmgr_context_t *ctp, io_devctl_t *msg, RESMGR_OCB_T *oc
         nbytes = 0;
         break;
     }
+    case VCAN_DCMD_GET_FILTER: {
+        /* Return the whole 64-byte table so a test can confirm exactly what a
+         * SET_FILTER forwarded through splintd wrote, including the bytes past
+         * the client's payload. Not part of the vulnerable path. */
+        memcpy(data, S.filter_table, VCAN_FILTER_TABLE_BYTES);
+        nbytes = (int)VCAN_FILTER_TABLE_BYTES;
+        break;
+    }
     default:
         return ENOTTY;
     }

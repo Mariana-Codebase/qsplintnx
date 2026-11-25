@@ -44,16 +44,22 @@ typedef struct vcan_status {
 #define VCAN_CMD_GET_STATUS 0x01
 #define VCAN_CMD_SEND_FRAME 0x02
 #define VCAN_CMD_SET_FILTER 0x05   /* vulnerable: payload len unchecked */
+#define VCAN_CMD_GET_FILTER 0x06   /* test aid: read the filter table back */
 
 #define VCAN_DCMD_GET_STATUS __DIOF(_DCMD_MISC, VCAN_CMD_GET_STATUS, vcan_status_t)
 #define VCAN_DCMD_SEND_FRAME __DIOT(_DCMD_MISC, VCAN_CMD_SEND_FRAME, vcan_frame_t)
 /* Declared with the "nominal" 64-byte table size; the bug is that the
  * driver trusts the received length instead of this. */
 #define VCAN_DCMD_SET_FILTER __DIOT(_DCMD_MISC, VCAN_CMD_SET_FILTER, uint8_t[VCAN_FILTER_TABLE_BYTES])
+/* GET_FILTER returns the current 64-byte table. Not part of the vulnerable
+ * surface; it exists so a test can see exactly what reached the driver after a
+ * SET_FILTER forwarded through splintd (regression for the devctl tail leak). */
+#define VCAN_DCMD_GET_FILTER __DIOF(_DCMD_MISC, VCAN_CMD_GET_FILTER, uint8_t[VCAN_FILTER_TABLE_BYTES])
 
 /* Short code as written in rules: (class << 8) | cmd */
 #define VCAN_SHORT_SET_FILTER 0x0505
 #define VCAN_SHORT_SEND_FRAME 0x0502
 #define VCAN_SHORT_GET_STATUS 0x0501
+#define VCAN_SHORT_GET_FILTER 0x0506
 
 #endif /* VENDOR_CAN_API_H */
