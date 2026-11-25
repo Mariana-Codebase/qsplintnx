@@ -20,7 +20,7 @@ BIN=${BIN:-$(dirname "$0")}
 cd "$BIN" || exit 1
 
 run_as() { _t=$1; shift; if [ "$SECPOL" = 1 ]; then on -T "$_t" "$@"; else "$@"; fi; }
-splintd_pid() { pidin -p splintd -F "%a" 2>/dev/null | tail -1 | tr -d ' '; }
+splintd_pid() { pidin -p splintd -F "%a" 2>/dev/null | grep -E '^ *[0-9]+ *$' | tail -1 | tr -d ' '; }
 banner() { echo; echo "=== $* ==="; }
 
 cleanup() { slay splintd vendor_can splint-super.sh 2>/dev/null; }

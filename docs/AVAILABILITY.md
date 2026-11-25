@@ -73,10 +73,25 @@ supervisor; `ham` was not present in this minimal image, so the demo uses the
 portable loop. Either way the combination is: relocated mode so the failure is
 closed, plus supervision so availability returns on its own.
 
-## Limits
+## A wedged daemon, not just a dead one
 
-This covers process death (crash, `kill`, an unhandled fault). It does not cover
-a `splintd` that is alive but wedged; detecting liveness (a watchdog ping on the
-control channel) is future work. The gap during respawn is a genuine
-availability cost of inline mediation, stated here rather than hidden: the
-trade is that during that gap the driver is unreachable, never exposed.
+Respawn-on-exit handles a `splintd` that dies, but not one that is alive and
+stuck: a deadlock, a runaway handler, or a stopped process. `demo/splint-watchdog.sh`
+is a liveness watchdog that pings the control channel on a timeout and, after
+repeated misses, forces `splintd` down (SIGCONT in case it was stopped, then
+SIGKILL) so the supervisor respawns it. `demo/run_watchdog.sh` demonstrates it by
+`SIGSTOP`-ing `splintd` (a stand-in for a wedge) and watching recovery:
+
+    splintd up, control channel answers
+    kill -STOP <splintd>                 # alive but not replying
+    [watchdog] missed ping 1/2
+    [watchdog] missed ping 2/2
+    [watchdog] splintd (<pid>) unresponsive; forcing respawn
+    [splint-super] splintd exited rc=137; respawning in 1s
+    [splint-super] start #2 ... signature verified (provenance OK)
+    -> new splintd running, /dev/vendor_can back
+
+So both failure shapes are covered: the supervisor for a daemon that exits, the
+watchdog for one that hangs. The gap during respawn is a genuine availability
+cost of inline mediation, stated here rather than hidden: during that gap the
+driver is unreachable in relocated mode, never exposed.

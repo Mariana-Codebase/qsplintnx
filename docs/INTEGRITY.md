@@ -77,10 +77,21 @@ an unversioned one is refused too.
     -> rollback refused: unversioned ruleset while version 2 is active
     splintctl reload patch-v3.rules   (version 3, signed)  -> OK
 
-The counter lives in the daemon for its lifetime. Persisting it across restarts
-so a reboot cannot reset it needs rollback-resistant storage (a monotonic
-counter in secure hardware, or a replay-protected file); that is the honest next
-step, noted rather than claimed.
+With `--version-store <path>` the counter is persisted: `splintd` writes the
+highest activated version to a file (atomically, temp then rename) and reads it
+back at startup, so restarting the daemon no longer resets the floor. On target:
+
+    splintd -r patch-v2.rules --version-store ver.store   # ver.store -> 2
+    (restart) splintd -r patch-v1.rules --version-store ver.store
+    -> rollback refused: version 1 is not newer than active 2   (refuses to start)
+    (restart) splintd -r patch-v3.rules --version-store ver.store
+    -> starts; ver.store -> 3
+
+The store file lives on ordinary storage, so a determined attacker who can
+rewrite it could still lower the floor; closing that fully needs a hardware
+monotonic counter (an RPMB partition, eFuses, or a TPM NV counter). The file
+closes the accidental-reset-on-restart hole and raises the bar to "tamper the
+counter file too", which is stated plainly rather than overclaimed.
 
 ## Authorship as part of the binary
 

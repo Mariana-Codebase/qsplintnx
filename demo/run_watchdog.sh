@@ -20,7 +20,9 @@ cd "$BIN" || exit 1
 TY=$([ "$SECPOL" = 1 ] && echo splintd_t)
 CY=$([ "$SECPOL" = 1 ] && echo splintctl_t)
 run_as() { _t=$1; shift; if [ "$SECPOL" = 1 ]; then on -T "$_t" "$@"; else "$@"; fi; }
-splintd_pid() { pidin -p splintd -F "%a" 2>/dev/null | tail -1 | tr -d ' '; }
+# Numeric pid of splintd, or empty. grep drops pidin's "pid" header line so an
+# absent process yields "" rather than the word "pid".
+splintd_pid() { pidin -p splintd -F "%a" 2>/dev/null | grep -E '^ *[0-9]+ *$' | tail -1 | tr -d ' '; }
 banner() { echo; echo "=== $* ==="; }
 
 cleanup() { slay splintd vendor_can splint-super.sh splint-watchdog.sh 2>/dev/null; }
