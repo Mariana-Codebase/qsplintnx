@@ -29,15 +29,12 @@ const char *splint_identity(void)
 
 void splint_print_version(FILE *out, const char *prog)
 {
-    static const char *bar =
-        "\xE2\x94\x81\xE2\x94\x81\xE2\x94\x81\xE2\x94\x81\xE2\x94\x81\xE2\x94\x81"
-        "\xE2\x94\x81\xE2\x94\x81\xE2\x94\x81\xE2\x94\x81\xE2\x94\x81\xE2\x94\x81"
-        "\xE2\x94\x81\xE2\x94\x81\xE2\x94\x81\xE2\x94\x81\xE2\x94\x81\xE2\x94\x81"
-        "\xE2\x94\x81\xE2\x94\x81\xE2\x94\x81\xE2\x94\x81\xE2\x94\x81\xE2\x94\x81"; /* 24x U+2501 */
+    /* ASCII bar so the banner renders on a plain serial console too. */
+    static const char *bar = "==============================================";
     fprintf(out, "%s\n", bar);
-    fprintf(out, "%s %s (%s)\n", QSPLINTNX_NAME, QSPLINTNX_VERSION, prog ? prog : "");
-    fprintf(out, "Designed by %s\n", QSPLINTNX_AUTHOR);
-    fprintf(out, "Native QNX runtime protection\n");
-    fprintf(out, "Cryptographic ruleset verification (Ed25519)\n");
+    fprintf(out, "  %s %s (%s)\n", QSPLINTNX_NAME, QSPLINTNX_VERSION, prog ? prog : "");
+    fprintf(out, "  Designed by %s\n", QSPLINTNX_AUTHOR);
+    fprintf(out, "  Native QNX runtime protection\n");
+    fprintf(out, "  Cryptographic ruleset verification (Ed25519)\n");
     fprintf(out, "%s\n", bar);
 }

@@ -57,6 +57,18 @@ Supervising `splintd` so it respawns turns the outage into a sub-second gap; the
 production mechanism is the QNX High Availability Manager. See
 `docs/AVAILABILITY.md` for the measured crash, denial and recovery behaviour.
 
+A ruleset changes how a protected device behaves, so `splintd` will not activate
+one unless it carries a valid Ed25519 signature (`<rules>.sig`) from a key
+compiled into the binary. The check covers startup, `SIGHUP` and control-channel
+reload; a tampered or unsigned ruleset is refused and the running ruleset stays
+in place. This gives both integrity and provenance: the bytes were not altered,
+and they came from the holder of the signing key. Signing is offline
+(`tools/splint-sign`); `splintd` only verifies. Authorship is also part of the
+software itself, not just comments: every binary carries
+`QSplintNX by MarianaCodebase` in the ELF section `.qsplintnx.identity`
+(`readelf -p .qsplintnx.identity splintd`), and `splintctl --version` prints it.
+See `docs/INTEGRITY.md`.
+
 Inspection is stateless and per-message: each message is judged on its own
 operation, devctl code, declared-versus-actual length and fixed-offset
 payload fields. This catches the classic length-confusion, bad-command and
@@ -100,6 +112,8 @@ on a QEMU target as the SDK is installed.
     demo/             vendor driver scenario, clients, rules, run scripts
     docs/RULES.md     the rule language, normative
     docs/PLAN.md      development plan and on-target spikes
+    tools/splint-sign/        offline Ed25519 keygen / sign / verify for rulesets
+    docs/INTEGRITY.md         ruleset signing, provenance, and embedded identity
     docs/AVAILABILITY.md      what happens to the device when splintd crashes
     docs/qemu-validation.md   the full on-target run (forwarding, patch,
                               shadow mode, latency, secpol bypass + isolation)
