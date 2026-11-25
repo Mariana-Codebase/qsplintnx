@@ -34,6 +34,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <getopt.h>
+#include <sched.h>
 #include <pthread.h>
 #include <sys/stat.h>
 
@@ -62,10 +63,28 @@ splintd_t g_splintd;
  * compiled-in trusted key. --no-verify turns it off for development only. */
 int g_verify_rules = 1;
 
-/* Active-ruleset summary (no engine getter for these); read by ctl.c. */
+/* Active-ruleset summary (no engine getter for these); read by ctl.c through
+ * splintd_active_summary() under the seqlock g_active_seq. */
 volatile uint32_t g_active_mode     = 0;
 volatile uint32_t g_active_npatch   = 0;
 volatile uint32_t g_active_nprofile = 0;
+volatile uint32_t g_active_seq      = 0;   /* even = stable, odd = being written */
+
+/* Coherent snapshot of the active summary for a reader on any thread. Retries
+ * while a writer is mid-update so the three fields always come from one
+ * activation, never a mix of old and new. */
+void splintd_active_summary(uint32_t *mode, uint32_t *npatch, uint32_t *nprofile)
+{
+    for (;;) {
+        uint32_t s1 = __atomic_load_n(&g_active_seq, __ATOMIC_ACQUIRE);
+        if (s1 & 1u) { sched_yield(); continue; }     /* write in progress */
+        uint32_t m = __atomic_load_n(&g_active_mode,     __ATOMIC_RELAXED);
+        uint32_t p = __atomic_load_n(&g_active_npatch,   __ATOMIC_RELAXED);
+        uint32_t f = __atomic_load_n(&g_active_nprofile, __ATOMIC_RELAXED);
+        uint32_t s2 = __atomic_load_n(&g_active_seq, __ATOMIC_ACQUIRE);
+        if (s1 == s2) { *mode = m; *npatch = p; *nprofile = f; return; }
+    }
+}
 
 /* Serialises ruleset activation so concurrent reloads commit one at a time and
  * the ruleset, metrics and learn state move together. */
@@ -261,31 +280,47 @@ int splintd_load_rules(const char *path, splint_parse_error_t *err)
     }
 
     /* Learn-table lifecycle. The table is allocated once and never freed while
-     * the daemon runs; mode changes only flip the atomic learn_active flag, so
-     * a worker that already loaded g_splintd.learn can never have it freed
-     * underneath it. Entering learn mode (0 -> 1) starts a clean session. */
+     * the daemon runs. learn_active is set only once the table is actually
+     * available, so the published learn state never claims observation is on
+     * while allocation failed. If the table cannot be allocated, learning stays
+     * off; patches still enforce, so the system remains safe. */
     if (mode == SPLINT_MODE_LEARN) {
-        if (__atomic_load_n(&g_splintd.learn, __ATOMIC_ACQUIRE) == NULL) {
+        splint_learn_t *l = __atomic_load_n(&g_splintd.learn, __ATOMIC_ACQUIRE);
+        if (l == NULL) {
             splint_learn_t *nl = splint_learn_new(NULL);
-            splint_learn_t *expected = NULL;
-            if (!__atomic_compare_exchange_n(&g_splintd.learn, &expected, nl,
-                                             false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
-                /* another thread installed one first; drop ours */
-                splint_learn_free(nl);
+            if (nl != NULL) {
+                splint_learn_t *expected = NULL;
+                if (__atomic_compare_exchange_n(&g_splintd.learn, &expected, nl,
+                                                false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+                    l = nl;
+                else {
+                    splint_learn_free(nl);     /* another thread won the race */
+                    l = expected;
+                }
             }
         }
-        if (__atomic_exchange_n(&g_splintd.learn_active, 1, __ATOMIC_ACQ_REL) == 0) {
-            splint_learn_t *l = __atomic_load_n(&g_splintd.learn, __ATOMIC_ACQUIRE);
-            if (l != NULL)
-                splint_learn_reset(l);     /* fresh session; reset is thread-safe */
+        if (l != NULL) {
+            if (__atomic_exchange_n(&g_splintd.learn_active, 1, __ATOMIC_ACQ_REL) == 0)
+                splint_learn_reset(l);         /* fresh session; reset is thread-safe */
+        } else {
+            __atomic_store_n(&g_splintd.learn_active, 0, __ATOMIC_RELEASE);
+            fprintf(stderr, "splintd: learn mode requested but learn table "
+                            "unavailable; observation disabled\n");
         }
     } else {
         __atomic_store_n(&g_splintd.learn_active, 0, __ATOMIC_RELEASE);
     }
 
+    /* Publish the active summary under a seqlock so a concurrent stats reader
+     * sees a torn-free snapshot of (mode, patches, profiles) even though each
+     * field is a separate atomic. Writers are already serialised by
+     * g_load_lock, so the sequence counter can be read plainly here. */
+    uint32_t seq = g_active_seq + 1u;
+    __atomic_store_n(&g_active_seq,      seq,      __ATOMIC_RELEASE);   /* odd: writing */
     __atomic_store_n(&g_active_mode,     mode,     __ATOMIC_RELAXED);
     __atomic_store_n(&g_active_npatch,   npatch,   __ATOMIC_RELAXED);
     __atomic_store_n(&g_active_nprofile, nprofile, __ATOMIC_RELAXED);
+    __atomic_store_n(&g_active_seq,      seq + 1u, __ATOMIC_RELEASE);   /* even: done */
     if (version > g_active_version)
         g_active_version = version;    /* ratchet forward; never decreases */
 

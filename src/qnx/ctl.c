@@ -43,9 +43,7 @@
 /* Active-ruleset summary kept by splintd_load_rules() in splintd_main.c; the
  * engine exposes no getter for mode/npatch/nprofile.  (Flag for Commander:
  * these belong in splintd_t.) */
-extern volatile uint32_t g_active_mode;
-extern volatile uint32_t g_active_npatch;
-extern volatile uint32_t g_active_nprofile;
+void splintd_active_summary(uint32_t *mode, uint32_t *npatch, uint32_t *nprofile);
 
 /* Reply data must outlive the handler (the library replies after it returns),
  * so it cannot sit on the handler's stack. One thread-local staging buffer,
@@ -94,9 +92,13 @@ static int ctl_do_stats(size_t *out_nbytes)
     splint_engine_stats(g_splintd.engine, &rep->engine);
     rep->forward_errors = __atomic_load_n(&g_splintd.forward_errors, __ATOMIC_RELAXED);
     rep->open_clients   = __atomic_load_n(&g_splintd.open_clients,   __ATOMIC_RELAXED);
-    rep->mode           = __atomic_load_n(&g_active_mode,     __ATOMIC_RELAXED);
-    rep->npatch         = __atomic_load_n(&g_active_npatch,   __ATOMIC_RELAXED);
-    rep->nprofile       = __atomic_load_n(&g_active_nprofile, __ATOMIC_RELAXED);
+    {
+        uint32_t mode, npatch, nprofile;
+        splintd_active_summary(&mode, &npatch, &nprofile);  /* coherent snapshot */
+        rep->mode     = mode;
+        rep->npatch   = npatch;
+        rep->nprofile = nprofile;
+    }
     rep->max_latency_ns = __atomic_load_n(&g_splintd.max_latency_ns, __ATOMIC_RELAXED);
     rep->sum_latency_ns = __atomic_load_n(&g_splintd.sum_latency_ns, __ATOMIC_RELAXED);
 
