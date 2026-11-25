@@ -55,7 +55,14 @@ void             splint_engine_free(splint_engine_t *e);
 /* Takes ownership of rs. Frees the previous ruleset only after no
  * decision can still be using it (engine.c documents the scheme).
  * rs may be NULL: then every message is allowed. */
-void splint_engine_set_rules(splint_engine_t *e, splint_ruleset_t *rs);
+/*
+ * Install `rs` as the active ruleset (engine takes ownership of rs, freeing it
+ * or the ruleset it replaces as appropriate). Returns 0 once the new ruleset is
+ * live, or -1 if it could not be installed (allocation failure, or e == NULL);
+ * on -1 the previously active ruleset is left running unchanged. Callers must
+ * check the result before reporting success or publishing new metrics.
+ */
+int splint_engine_set_rules(splint_engine_t *e, splint_ruleset_t *rs);
 
 /* Decide one message. Never fails; fills *v completely. Bounded time:
  * O(npatch * SPLINT_MAX_CONDS + nallow + nrate). */

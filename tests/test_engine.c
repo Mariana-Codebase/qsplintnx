@@ -711,8 +711,21 @@ static void test_read_maxlen(void)
     splint_engine_free(e);
 }
 
+/* set_rules reports a verifiable status: 0 once the ruleset is live, -1 when it
+ * cannot install (here, a NULL engine), so the loader never claims a false
+ * success. */
+static void test_set_rules_status(void)
+{
+    splint_engine_t *e = splint_engine_new();
+    CHECK(splint_engine_set_rules(e, rs_new()) == 0);       /* installed */
+    CHECK(splint_engine_set_rules(e, NULL) == 0);           /* clear is success */
+    CHECK(splint_engine_set_rules(NULL, rs_new()) == -1);   /* no engine -> failure */
+    splint_engine_free(e);
+}
+
 int main(void)
 {
+    test_set_rules_status();
     test_null_ruleset();
     test_operands_and_cmps();
     test_patch_matching();

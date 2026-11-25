@@ -145,23 +145,25 @@ void splint_engine_free(splint_engine_t *e)
     free(e);
 }
 
-void splint_engine_set_rules(splint_engine_t *e, splint_ruleset_t *rs)
+int splint_engine_set_rules(splint_engine_t *e, splint_ruleset_t *rs)
 {
     engine_slot_t *ns = NULL, *old;
     unsigned ep;
 
     if (!e) {
         free(rs);
-        return;
+        return -1;
     }
     pthread_mutex_lock(&e->wlock);
     if (rs) {
         ns = malloc(sizeof(*ns));
         if (!ns) {
-            /* Cannot install: keep the running ruleset (all-or-nothing). */
+            /* Cannot install: keep the running ruleset (all-or-nothing). The
+             * caller learns of the failure from the -1 and keeps reporting the
+             * old ruleset rather than a false success. */
             pthread_mutex_unlock(&e->wlock);
             free(rs);
-            return;
+            return -1;
         }
         ns->rs = rs;
         ns->gen = e->next_gen++;
@@ -173,6 +175,7 @@ void splint_engine_set_rules(splint_engine_t *e, splint_ruleset_t *rs)
         sched_yield();
     slot_free(old);                                         /* W4 */
     pthread_mutex_unlock(&e->wlock);
+    return 0;
 }
 
 /* ---------------------------------------------------------------- eval */

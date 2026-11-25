@@ -67,6 +67,10 @@ volatile uint32_t g_active_mode     = 0;
 volatile uint32_t g_active_npatch   = 0;
 volatile uint32_t g_active_nprofile = 0;
 
+/* Serialises ruleset activation so concurrent reloads commit one at a time and
+ * the ruleset, metrics and learn state move together. */
+static pthread_mutex_t g_load_lock = PTHREAD_MUTEX_INITIALIZER;
+
 /* Connect/IO tables and the OCB mount, shared by every mapping. */
 static resmgr_connect_funcs_t g_cf;
 static resmgr_io_funcs_t      g_io;
@@ -208,6 +212,26 @@ int splintd_load_rules(const char *path, splint_parse_error_t *err)
     uint32_t npatch   = rs->npatch;
     uint32_t nprofile = rs->nprofile;
 
+    /*
+     * Commit the activation as one transition. g_load_lock serialises writers so
+     * two concurrent reloads cannot interleave the ruleset swap with the mode,
+     * patch-count and learn-state updates. The ruleset swap is the commit point:
+     * only once splint_engine_set_rules reports success do we publish the new
+     * metrics and apply the learn-state change. If activation fails (out of
+     * memory), nothing moves -- the previous ruleset stays live, the metrics and
+     * learn state keep describing it, and the caller gets a real error instead
+     * of a false success.
+     */
+    pthread_mutex_lock(&g_load_lock);
+
+    if (splint_engine_set_rules(g_splintd.engine, rs) != 0) {   /* takes ownership of rs */
+        pthread_mutex_unlock(&g_load_lock);
+        if (err != NULL)
+            snprintf(err->msg, sizeof err->msg,
+                     "activation failed (out of memory); previous ruleset kept");
+        return -1;
+    }
+
     /* Learn-table lifecycle. The table is allocated once and never freed while
      * the daemon runs; mode changes only flip the atomic learn_active flag, so
      * a worker that already loaded g_splintd.learn can never have it freed
@@ -231,11 +255,11 @@ int splintd_load_rules(const char *path, splint_parse_error_t *err)
         __atomic_store_n(&g_splintd.learn_active, 0, __ATOMIC_RELEASE);
     }
 
-    splint_engine_set_rules(g_splintd.engine, rs);     /* takes ownership of rs */
-
     __atomic_store_n(&g_active_mode,     mode,     __ATOMIC_RELAXED);
     __atomic_store_n(&g_active_npatch,   npatch,   __ATOMIC_RELAXED);
     __atomic_store_n(&g_active_nprofile, nprofile, __ATOMIC_RELAXED);
+
+    pthread_mutex_unlock(&g_load_lock);
     return 0;
 }
 
