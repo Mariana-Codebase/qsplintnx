@@ -93,7 +93,7 @@ static iofunc_mount_t         g_mount;
 static int splintd_verify_rules_sig(const char *path, const unsigned char *buf,
                                     size_t total, splint_parse_error_t *err)
 {
-    char sigpath[512];
+    char sigpath[288];
     int n = snprintf(sigpath, sizeof sigpath, "%s.sig", path);
     if (n < 0 || (size_t)n >= sizeof sigpath) {
         if (err != NULL) snprintf(err->msg, sizeof err->msg, "signature path too long");
@@ -104,7 +104,7 @@ static int splintd_verify_rules_sig(const char *path, const unsigned char *buf,
     if (fd < 0) {
         if (err != NULL)
             snprintf(err->msg, sizeof err->msg,
-                     "no signature %s: %s (ruleset must be signed; see splint-sign)",
+                     "unsigned ruleset: %.90s missing (%.30s); sign it with splint-sign",
                      sigpath, strerror(errno));
         return -1;
     }
@@ -121,7 +121,8 @@ static int splintd_verify_rules_sig(const char *path, const unsigned char *buf,
     }
     (void)close(fd);
     if (got != sizeof sig) {
-        if (err != NULL) snprintf(err->msg, sizeof err->msg, "%s is not a %u-byte signature",
+        if (err != NULL) snprintf(err->msg, sizeof err->msg,
+                                  "%.110s is not a %u-byte signature",
                                   sigpath, (unsigned)SPLINT_SIG_BYTES);
         return -1;
     }
@@ -129,7 +130,7 @@ static int splintd_verify_rules_sig(const char *path, const unsigned char *buf,
     if (splint_sig_verify(buf, total, sig, SPLINT_TRUSTED_PUBKEY) != 0) {
         if (err != NULL)
             snprintf(err->msg, sizeof err->msg,
-                     "signature verification failed for %s (wrong key or tampered ruleset)",
+                     "signature check failed for %.100s (wrong key or tampered ruleset)",
                      path);
         return -1;
     }
