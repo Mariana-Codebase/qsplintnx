@@ -93,9 +93,55 @@ static pthread_mutex_t g_load_lock = PTHREAD_MUTEX_INITIALIZER;
 /* Highest ruleset version activated so far (anti-rollback). Guarded by
  * g_load_lock. A versioned ruleset (version > 0) is accepted only if its
  * version exceeds this; once any versioned ruleset is active, an older or
- * unversioned one is refused. Resets on restart -- persisting it across reboots
- * needs rollback-resistant storage and is noted as future work. */
+ * unversioned one is refused. With --version-store it is persisted to a file
+ * and reloaded at startup, so a restart cannot reset it. The file still lives
+ * on ordinary storage: a determined attacker who can rewrite it could lower the
+ * floor, so full replay resistance needs a hardware monotonic counter (RPMB,
+ * fuses, a TPM NV counter); the file closes the accidental-reset hole and
+ * raises the bar, which is stated honestly rather than overclaimed. */
 static uint64_t g_active_version = 0;
+static const char *g_version_store = NULL;   /* path for the persisted counter */
+
+/* Read the persisted anti-rollback floor, if a store is configured. Best
+ * effort: a missing or unreadable file leaves the floor at 0. */
+static void version_store_load(void)
+{
+    if (g_version_store == NULL)
+        return;
+    FILE *f = fopen(g_version_store, "r");
+    if (f == NULL)
+        return;                                /* first run: no floor yet */
+    unsigned long long v = 0;
+    if (fscanf(f, "%llu", &v) == 1)
+        g_active_version = (uint64_t)v;
+    fclose(f);
+}
+
+/* Persist the new floor atomically (write a temp file, then rename over the
+ * target) so a crash mid-write cannot leave a truncated counter. Called under
+ * g_load_lock. Best effort: a write failure is logged, not fatal -- the
+ * in-memory floor still holds for this daemon lifetime. */
+static void version_store_save(uint64_t v)
+{
+    if (g_version_store == NULL)
+        return;
+    char tmp[288];
+    if ((size_t)snprintf(tmp, sizeof tmp, "%.270s.tmp", g_version_store) >= sizeof tmp)
+        return;
+    FILE *f = fopen(tmp, "w");
+    if (f == NULL) {
+        fprintf(stderr, "splintd: cannot write version store %.100s: %s\n",
+                tmp, strerror(errno));
+        return;
+    }
+    int ok = (fprintf(f, "%llu\n", (unsigned long long)v) > 0);
+    if (fclose(f) != 0)
+        ok = 0;
+    if (ok && rename(tmp, g_version_store) != 0) {
+        fprintf(stderr, "splintd: cannot commit version store %.100s: %s\n",
+                g_version_store, strerror(errno));
+    }
+}
 
 /* Connect/IO tables and the OCB mount, shared by every mapping. */
 static resmgr_connect_funcs_t g_cf;
@@ -321,8 +367,10 @@ int splintd_load_rules(const char *path, splint_parse_error_t *err)
     __atomic_store_n(&g_active_npatch,   npatch,   __ATOMIC_RELAXED);
     __atomic_store_n(&g_active_nprofile, nprofile, __ATOMIC_RELAXED);
     __atomic_store_n(&g_active_seq,      seq + 1u, __ATOMIC_RELEASE);   /* even: done */
-    if (version > g_active_version)
+    if (version > g_active_version) {
         g_active_version = version;    /* ratchet forward; never decreases */
+        version_store_save(g_active_version);   /* persist the new floor */
+    }
 
     pthread_mutex_unlock(&g_load_lock);
     return 0;
@@ -337,8 +385,10 @@ static void usage(const char *argv0)
     fprintf(stderr,
         "usage: %s -r <rules> [-m <public>=<backend>]... [-s <public>]...\n"
         "          [-c <ctlpath>] [-t <threads>] [-v] [--no-verify]\n"
+        "          [--version-store <path>]\n"
         "  rulesets must carry a valid Ed25519 signature (<rules>.sig);\n"
-        "  --no-verify disables signature checking (development only)\n",
+        "  --no-verify disables signature checking (development only)\n"
+        "  --version-store persists the anti-rollback version across restarts\n",
         argv0);
 }
 
@@ -447,8 +497,9 @@ int main(int argc, char **argv)
     int         opt;
 
     static const struct option longopts[] = {
-        { "no-verify", no_argument, NULL, 'N' },
-        { "version",   no_argument, NULL, 'Q' },
+        { "no-verify",     no_argument,       NULL, 'N' },
+        { "version",       no_argument,       NULL, 'Q' },
+        { "version-store", required_argument, NULL, 'S' },
         { NULL, 0, NULL, 0 }
     };
     while ((opt = getopt_long(argc, argv, "r:m:s:c:t:v", longopts, NULL)) != -1) {
@@ -460,6 +511,7 @@ int main(int argc, char **argv)
         case 't': threads = atoi(optarg); break;
         case 'v': g_splintd.verbose++; break;
         case 'N': g_verify_rules = 0; break;
+        case 'S': g_version_store = optarg; break;
         case 'Q': splint_print_version(stdout, "splintd"); return 0;
         default:  usage(argv[0]); return 1;
         }
@@ -487,6 +539,10 @@ int main(int argc, char **argv)
         fprintf(stderr, "splintd: engine/log init failed\n");
         return 1;
     }
+
+    /* Load the persisted anti-rollback floor before the first ruleset, so a
+     * restart cannot be used to reinstate a ruleset older than the last one. */
+    version_store_load();
 
     splint_parse_error_t perr;
     if (splintd_load_rules(rules, &perr) != 0) {
