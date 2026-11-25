@@ -112,6 +112,8 @@ on a QEMU target as the SDK is installed.
     demo/             vendor driver scenario, clients, rules, run scripts
     docs/RULES.md     the rule language, normative
     docs/PLAN.md      development plan and on-target spikes
+    SUBMISSION.md             hackathon submission summary with evidence
+    docs/CODELAB.md           guided walkthrough from empty SDP to running demo
     tools/splint-sign/        offline Ed25519 keygen / sign / verify for rulesets
     docs/INTEGRITY.md         ruleset signing, provenance, and embedded identity
     docs/AVAILABILITY.md      what happens to the device when splintd crashes
