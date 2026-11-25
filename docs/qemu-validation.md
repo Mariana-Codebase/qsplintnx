@@ -217,6 +217,30 @@ otherwise drive the daemon it sits behind: the control interface is reachable
 only by the control client's type. A reload that is refused this way leaves the
 active ruleset in place; `splintctl` reports the failure and exits non-zero.
 
+## Develop mode versus secure mode
+
+These runs use `--secpol=develop`. That is worth stating precisely, because
+develop mode is not "logging only". It *enforces* every action a defined rule
+covers and denies it when no rule allows it; it only permits, and logs, actions
+that fall entirely outside the policy. The QSplintNX rules name the driver
+channel, the data channel and the control channel explicitly, so every denial
+shown above is a real `Operation not permitted` returned by the kernel, not a
+develop-mode courtesy. The `secpolgenerate:` lines are the log of that
+enforcement.
+
+A full `--secpol=secure` image, which denies uncovered actions across the whole
+system, is additional work and mostly concerns the base OS rather than QSplintNX.
+Exercising the demo in develop mode leaves two kinds of event in the log. One is
+base-system noise unrelated to this project, for example `io-sock ... failed to
+access /dev/usb/io-usb-otg`. The other is the one app grant the fragment does not
+yet carry: `splintctl ... channel_connect:devb_t`, needed for `splintctl` (and
+`splintd` at startup) to read a ruleset file off the filesystem. The intended
+denials, a device client reaching the driver or the control channel, must stay
+denied and are not grants to add. Converting to a clean secure boot also means
+reconciling the custom type ids with the base `pma` type table, which
+`secpolgenerate` currently reports as out of range; that is the open task for a
+secure-mode image.
+
 ## Concurrency: the learn-table reload race is gone
 
 An earlier version freed the learn table on a mode switch while a worker thread
