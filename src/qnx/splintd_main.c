@@ -104,8 +104,7 @@ static int splintd_verify_rules_sig(const char *path, const unsigned char *buf,
     if (fd < 0) {
         if (err != NULL)
             snprintf(err->msg, sizeof err->msg,
-                     "unsigned ruleset: %.90s missing (%.30s); sign it with splint-sign",
-                     sigpath, strerror(errno));
+                     "unsigned ruleset %.70s; sign it with splint-sign", sigpath);
         return -1;
     }
 
@@ -114,7 +113,8 @@ static int splintd_verify_rules_sig(const char *path, const unsigned char *buf,
     while (got < sizeof sig) {
         ssize_t r = read(fd, sig + got, sizeof sig - got);
         if (r < 0) { if (errno == EINTR) continue;
-            if (err != NULL) snprintf(err->msg, sizeof err->msg, "read %s: %s", sigpath, strerror(errno));
+            if (err != NULL) snprintf(err->msg, sizeof err->msg,
+                                      "read %.70s: %.25s", sigpath, strerror(errno));
             (void)close(fd); return -1; }
         if (r == 0) break;
         got += (size_t)r;
@@ -122,7 +122,7 @@ static int splintd_verify_rules_sig(const char *path, const unsigned char *buf,
     (void)close(fd);
     if (got != sizeof sig) {
         if (err != NULL) snprintf(err->msg, sizeof err->msg,
-                                  "%.110s is not a %u-byte signature",
+                                  "%.70s is not a %u-byte signature",
                                   sigpath, (unsigned)SPLINT_SIG_BYTES);
         return -1;
     }
@@ -130,8 +130,7 @@ static int splintd_verify_rules_sig(const char *path, const unsigned char *buf,
     if (splint_sig_verify(buf, total, sig, SPLINT_TRUSTED_PUBKEY) != 0) {
         if (err != NULL)
             snprintf(err->msg, sizeof err->msg,
-                     "signature check failed for %.100s (wrong key or tampered ruleset)",
-                     path);
+                     "signature check failed for %.80s (wrong key or tampered)", path);
         return -1;
     }
     return 0;
