@@ -1,0 +1,20 @@
+QSplintNX
+Copyright (c) 2026 MarianaCodebase
+
+This product includes software developed by MarianaCodebase as an entry for
+the QNX Global Hackathon 2026 (QNX Everywhere), category Automotive & Mobility.
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use
+this software except in compliance with the License. You may obtain a copy of
+the License at http://www.apache.org/licenses/LICENSE-2.0
+
+The identity string "QSplintNX by MarianaCodebase" is embedded in every built
+binary in the ELF section .qsplintnx.identity and can be read with:
+  readelf -p .qsplintnx.identity splintd
+
+Third-party components
+----------------------
+third_party/ed25519-ref/
+  Ed25519 signature verification, SUPERCOP "ref" implementation as vendored in
+  the python-ed25519 package by Brian Warner. Public domain. Used unmodified
+  for ruleset signature verification; see third_party/ed25519-ref/README.md.

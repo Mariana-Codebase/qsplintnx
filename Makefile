@@ -18,13 +18,23 @@ BUILD   := build/host
 
 CORE_SRC := src/core/msg.c src/core/rules_lexer.c src/core/rules_parser.c \
             src/core/rules_format.c src/core/engine.c src/core/ratelimit.c \
-            src/core/learn.c src/core/log.c
+            src/core/learn.c src/core/log.c src/core/identity.c
 CORE_OBJ := $(CORE_SRC:src/core/%.c=$(BUILD)/core/%.o)
 
-TESTS    := test_lexer test_rules test_engine test_learn test_log
+# Ruleset signing. The ed25519 reference (third_party) is vendored verbatim and
+# built with warnings off; splint_sig.c is our wrapper and built normally.
+SIG_INC        := -Ithird_party/ed25519-ref
+SIG_VENDOR_SRC := third_party/ed25519-ref/ed25519.c third_party/ed25519-ref/fe25519.c \
+                  third_party/ed25519-ref/ge25519.c third_party/ed25519-ref/sc25519.c \
+                  third_party/ed25519-ref/verify.c third_party/ed25519-ref/sha512-hash.c \
+                  third_party/ed25519-ref/sha512-blocks.c
+SIG_VENDOR_OBJ := $(SIG_VENDOR_SRC:%.c=$(BUILD)/%.o)
+SIG_WRAP_OBJ   := $(BUILD)/core/splint_sig.o
+
+TESTS    := test_lexer test_rules test_engine test_learn test_log test_sig
 TEST_BIN := $(TESTS:%=$(BUILD)/tests/%)
 
-.PHONY: all host test sanitize fuzz bench qnx clean
+.PHONY: all host test sanitize fuzz bench qnx clean splint-sign
 all: host
 host: $(BUILD)/libsplintcore.a $(TEST_BIN)
 
@@ -35,9 +45,28 @@ $(BUILD)/core/%.o: src/core/%.c include/splint/*.h src/core/*.h
 $(BUILD)/libsplintcore.a: $(CORE_OBJ)
 	ar rcs $@ $^
 
-$(BUILD)/tests/%: tests/%.c tests/test_util.h $(BUILD)/libsplintcore.a
+# Vendored ed25519 reference: compile verbatim with warnings off.
+$(BUILD)/third_party/ed25519-ref/%.o: third_party/ed25519-ref/%.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CSTD) $(WARN) $(CFLAGS) $(INC) -Itests $< $(BUILD)/libsplintcore.a -lpthread -o $@
+	$(CC) $(CSTD) -w $(CFLAGS) $(SIG_INC) -c $< -o $@
+
+# Our signing wrapper: normal warnings.
+$(SIG_WRAP_OBJ): src/core/splint_sig.c include/splint/splint_sig.h
+	@mkdir -p $(dir $@)
+	$(CC) $(CSTD) $(WARN) $(CFLAGS) $(INC) $(SIG_INC) -c $< -o $@
+
+$(BUILD)/libsplintsig.a: $(SIG_VENDOR_OBJ) $(SIG_WRAP_OBJ)
+	ar rcs $@ $^
+
+$(BUILD)/tests/%: tests/%.c tests/test_util.h $(BUILD)/libsplintcore.a $(BUILD)/libsplintsig.a
+	@mkdir -p $(dir $@)
+	$(CC) $(CSTD) $(WARN) $(CFLAGS) $(INC) $(SIG_INC) -Itests $< $(BUILD)/libsplintcore.a $(BUILD)/libsplintsig.a -lpthread -o $@
+
+# Offline signing tool (host).
+splint-sign: $(BUILD)/splint-sign
+$(BUILD)/splint-sign: tools/splint-sign/splint-sign.c $(BUILD)/libsplintsig.a
+	@mkdir -p $(dir $@)
+	$(CC) $(CSTD) $(WARN) $(CFLAGS) $(INC) $(SIG_INC) $< $(BUILD)/libsplintsig.a -o $@
 
 test: host
 	@set -e; for t in $(TEST_BIN); do echo "== $$t"; $$t; done; echo "ALL TESTS PASSED"
@@ -68,11 +97,18 @@ SPLINT_SECPOL_LIB ?= -lsecpol
 QNX_SPLINTD := src/qnx/splintd_main.c src/qnx/interpose.c src/qnx/backend.c \
                src/qnx/ctl.c src/qnx/clientinfo.c
 
+QSIG_OBJ := $(SIG_VENDOR_SRC:%.c=$(QBUILD)/%.o)
+
 qnx:
 	@test -n "$(QNX_TARGET)" || { echo "QNX_TARGET not set: source ~/qnx800/qnxsdp-env.sh"; exit 1; }
-	@mkdir -p $(QBUILD)
-	$(QCC) $(QFLAGS) $(QNX_SPLINTD) $(CORE_SRC) $(SPLINT_SECPOL_LIB) -o $(QBUILD)/splintd
-	$(QCC) $(QFLAGS) tools/splintctl/splintctl.c src/core/log.c src/core/msg.c -o $(QBUILD)/splintctl
+	@mkdir -p $(QBUILD) $(QBUILD)/third_party/ed25519-ref
+	@for s in $(SIG_VENDOR_SRC); do \
+	    o=$(QBUILD)/$${s%.c}.o; \
+	    echo "$(QCC) -V$(QARCH) $(CSTD) -D_QNX_SOURCE -w -O2 -g $(SIG_INC) -c $$s -o $$o"; \
+	    $(QCC) -V$(QARCH) $(CSTD) -D_QNX_SOURCE -w -O2 -g $(SIG_INC) -c $$s -o $$o || exit 1; \
+	done
+	$(QCC) $(QFLAGS) $(SIG_INC) $(QNX_SPLINTD) $(CORE_SRC) src/core/splint_sig.c $(QSIG_OBJ) $(SPLINT_SECPOL_LIB) -o $(QBUILD)/splintd
+	$(QCC) $(QFLAGS) tools/splintctl/splintctl.c src/core/log.c src/core/msg.c src/core/identity.c -o $(QBUILD)/splintctl
 	$(QCC) $(QFLAGS) -Idemo/include demo/vendor_can/vendor_can.c -o $(QBUILD)/vendor_can
 	$(QCC) $(QFLAGS) -Idemo/include demo/clients/can_client.c -o $(QBUILD)/can_client
 	$(QCC) $(QFLAGS) -Idemo/include demo/clients/exploit.c -o $(QBUILD)/exploit

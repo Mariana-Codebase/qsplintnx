@@ -33,6 +33,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <getopt.h>
 #include <pthread.h>
 #include <sys/stat.h>
 
@@ -46,11 +47,20 @@
 #include <secpol/secpol.h>
 #endif
 
+#include "splint/splint_sig.h"
+#include "splint/splint_pubkey.h"   /* SPLINT_TRUSTED_PUBKEY, compiled in */
+#include "splint/identity.h"
+
 /* ------------------------------------------------------------------ */
 /* Global state.                                                       */
 /* ------------------------------------------------------------------ */
 
 splintd_t g_splintd;
+
+/* Ruleset signature enforcement. On by default: splintd refuses to activate a
+ * ruleset whose detached Ed25519 signature does not verify against the
+ * compiled-in trusted key. --no-verify turns it off for development only. */
+int g_verify_rules = 1;
 
 /* Active-ruleset summary (no engine getter for these); read by ctl.c. */
 volatile uint32_t g_active_mode     = 0;
@@ -72,6 +82,59 @@ static iofunc_mount_t         g_mount;
 /* ------------------------------------------------------------------ */
 /* Ruleset load (startup, SIGHUP, and ctl reload all land here).       */
 /* ------------------------------------------------------------------ */
+
+/*
+ * Verify the detached signature <path>.sig over the loaded rules bytes with the
+ * compiled-in trusted key. Returns 0 on success, -1 on any failure (missing or
+ * short signature file, or a signature that does not verify). The caller leaves
+ * the running ruleset in place when this fails, so an unsigned or tampered
+ * ruleset can never become active.
+ */
+static int splintd_verify_rules_sig(const char *path, const unsigned char *buf,
+                                    size_t total, splint_parse_error_t *err)
+{
+    char sigpath[512];
+    int n = snprintf(sigpath, sizeof sigpath, "%s.sig", path);
+    if (n < 0 || (size_t)n >= sizeof sigpath) {
+        if (err != NULL) snprintf(err->msg, sizeof err->msg, "signature path too long");
+        return -1;
+    }
+
+    int fd = open(sigpath, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        if (err != NULL)
+            snprintf(err->msg, sizeof err->msg,
+                     "no signature %s: %s (ruleset must be signed; see splint-sign)",
+                     sigpath, strerror(errno));
+        return -1;
+    }
+
+    unsigned char sig[SPLINT_SIG_BYTES];
+    size_t got = 0;
+    while (got < sizeof sig) {
+        ssize_t r = read(fd, sig + got, sizeof sig - got);
+        if (r < 0) { if (errno == EINTR) continue;
+            if (err != NULL) snprintf(err->msg, sizeof err->msg, "read %s: %s", sigpath, strerror(errno));
+            (void)close(fd); return -1; }
+        if (r == 0) break;
+        got += (size_t)r;
+    }
+    (void)close(fd);
+    if (got != sizeof sig) {
+        if (err != NULL) snprintf(err->msg, sizeof err->msg, "%s is not a %u-byte signature",
+                                  sigpath, (unsigned)SPLINT_SIG_BYTES);
+        return -1;
+    }
+
+    if (splint_sig_verify(buf, total, sig, SPLINT_TRUSTED_PUBKEY) != 0) {
+        if (err != NULL)
+            snprintf(err->msg, sizeof err->msg,
+                     "signature verification failed for %s (wrong key or tampered ruleset)",
+                     path);
+        return -1;
+    }
+    return 0;
+}
 
 int splintd_load_rules(const char *path, splint_parse_error_t *err)
 {
@@ -127,6 +190,13 @@ int splintd_load_rules(const char *path, splint_parse_error_t *err)
     }
     (void)close(fd);
 
+    /* Verify the ruleset's signature before parsing it, so an unsigned or
+     * tampered ruleset never reaches the engine. Skipped only with --no-verify. */
+    if (g_verify_rules && splintd_verify_rules_sig(path, (const unsigned char *)buf, total, err) != 0) {
+        free(buf);
+        return -1;                 /* err filled; running ruleset untouched */
+    }
+
     splint_ruleset_t *rs = NULL;
     int rc = splint_rules_parse(buf, total, &rs, err);
     free(buf);
@@ -177,7 +247,9 @@ static void usage(const char *argv0)
 {
     fprintf(stderr,
         "usage: %s -r <rules> [-m <public>=<backend>]... [-s <public>]...\n"
-        "          [-c <ctlpath>] [-t <threads>] [-v]\n",
+        "          [-c <ctlpath>] [-t <threads>] [-v] [--no-verify]\n"
+        "  rulesets must carry a valid Ed25519 signature (<rules>.sig);\n"
+        "  --no-verify disables signature checking (development only)\n",
         argv0);
 }
 
@@ -285,7 +357,12 @@ int main(int argc, char **argv)
     int         threads = 4;
     int         opt;
 
-    while ((opt = getopt(argc, argv, "r:m:s:c:t:v")) != -1) {
+    static const struct option longopts[] = {
+        { "no-verify", no_argument, NULL, 'N' },
+        { "version",   no_argument, NULL, 'Q' },
+        { NULL, 0, NULL, 0 }
+    };
+    while ((opt = getopt_long(argc, argv, "r:m:s:c:t:v", longopts, NULL)) != -1) {
         switch (opt) {
         case 'r': rules = optarg; break;
         case 'm': if (add_mapping(optarg, SPLINTD_BACKEND_RELOCATED) != 0) return 1; break;
@@ -293,6 +370,8 @@ int main(int argc, char **argv)
         case 'c': ctlpath = optarg; break;
         case 't': threads = atoi(optarg); break;
         case 'v': g_splintd.verbose++; break;
+        case 'N': g_verify_rules = 0; break;
+        case 'Q': splint_print_version(stdout, "splintd"); return 0;
         default:  usage(argv[0]); return 1;
         }
     }
@@ -326,6 +405,9 @@ int main(int argc, char **argv)
                 rules, perr.line, perr.col, perr.msg);
         return 1;
     }
+    fprintf(stderr, "splintd: %s; ruleset %s %s\n", splint_identity(), rules,
+            g_verify_rules ? "signature verified (provenance OK)"
+                           : "loaded WITHOUT signature check (--no-verify)");
 
     g_splintd.dpp = dispatch_create();
     if (g_splintd.dpp == NULL) {

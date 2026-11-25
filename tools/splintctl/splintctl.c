@@ -46,6 +46,7 @@
 
 #include "splint/ctl.h"
 #include "splint/engine.h"
+#include "splint/identity.h"
 #include "splint/log.h"
 #include "splint/rules.h"
 
@@ -360,6 +361,9 @@ int main(int argc, char **argv)
             argi += 2;
         } else if (strcmp(argv[argi], "-h") == 0 || strcmp(argv[argi], "--help") == 0) {
             usage(stdout);
+            return 0;
+        } else if (strcmp(argv[argi], "-V") == 0 || strcmp(argv[argi], "--version") == 0) {
+            splint_print_version(stdout, g_prog);
             return 0;
         } else {
             usage(stderr);
