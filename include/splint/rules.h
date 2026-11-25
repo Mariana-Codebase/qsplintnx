@@ -79,6 +79,10 @@ typedef struct splint_allow {
     uint32_t    code_lo, code_hi;   /* inclusive; lo == hi for single */
     bool        has_client;
     char        client[SPLINT_NAME_MAX];
+    bool        has_uid;        /* match the kernel-verified effective uid */
+    uint32_t    uid;
+    bool        has_gid;        /* match the kernel-verified effective gid */
+    uint32_t    gid;
     bool        has_maxlen;
     uint64_t    maxlen;
     uint32_t    line;

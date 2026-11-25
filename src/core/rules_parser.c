@@ -397,6 +397,22 @@ static int parse_allow(parser_t *p, splint_profile_t *pf, uint32_t sline, uint32
         if (parse_client(p, &a->has_client, a->client))
             return -1;
     }
+    if (is_kw(p, "uid")) {
+        advance(p);
+        if (p->tok.kind != SPLINT_TOK_INT)
+            return fail_tok(p, "expected integer after uid");
+        a->uid = (uint32_t)p->tok.ival;
+        a->has_uid = true;
+        advance(p);
+    }
+    if (is_kw(p, "gid")) {
+        advance(p);
+        if (p->tok.kind != SPLINT_TOK_INT)
+            return fail_tok(p, "expected integer after gid");
+        a->gid = (uint32_t)p->tok.ival;
+        a->has_gid = true;
+        advance(p);
+    }
     if (is_kw(p, "maxlen")) {
         advance(p);
         if (p->tok.kind != SPLINT_TOK_INT)
@@ -406,7 +422,7 @@ static int parse_allow(parser_t *p, splint_profile_t *pf, uint32_t sline, uint32
         advance(p);
     }
     if (!at_stmt_end(p))
-        return fail_tok(p, "expected code, client \"name\", maxlen n or end of statement");
+        return fail_tok(p, "expected code, client \"name\", uid n, gid n, maxlen n or end of statement");
     pf->nallow++;
     return 0;
 }

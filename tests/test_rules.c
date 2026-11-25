@@ -124,7 +124,9 @@ static int ruleset_eq(const splint_ruleset_t *a, const splint_ruleset_t *b)
             if (p->op != q->op || p->has_code != q->has_code || p->code_lo != q->code_lo ||
                 p->code_hi != q->code_hi || p->has_client != q->has_client ||
                 strcmp(p->client, q->client) || p->has_maxlen != q->has_maxlen ||
-                p->maxlen != q->maxlen)
+                p->maxlen != q->maxlen ||
+                p->has_uid != q->has_uid || p->uid != q->uid ||
+                p->has_gid != q->has_gid || p->gid != q->gid)
                 return 0;
         }
         for (j = 0; j < x->nrate; j++) {
@@ -763,6 +765,27 @@ static void test_version(void)
     CHECK(splint_rules_parse("version notanumber\n", 19, &bad, NULL) == -1);
 }
 
+/* allow lines can match the kernel-verified uid/gid, parsed and round-tripped
+ * alongside client/maxlen. */
+static void test_uid_gid(void)
+{
+    static const char SRC[] =
+        "profile /dev/vendor_can {\n"
+        "  default block\n"
+        "  allow devctl 0x0505 client \"can_client\" uid 1000 gid 50 maxlen 64\n"
+        "  allow read uid 1000\n"
+        "}\n";
+    splint_ruleset_t *rs = PARSE_OK(SRC);
+    const splint_allow_t *a0 = &rs->profile[0].allow[0];
+    CHECK(a0->has_client && a0->has_uid && a0->uid == 1000u &&
+          a0->has_gid && a0->gid == 50u && a0->has_maxlen);
+    const splint_allow_t *a1 = &rs->profile[0].allow[1];
+    CHECK(a1->has_uid && a1->uid == 1000u && !a1->has_gid && !a1->has_client);
+    free(rs);
+
+    ROUNDTRIP(SRC);
+}
+
 int main(void)
 {
     test_rules_md_patch();
@@ -774,5 +797,6 @@ int main(void)
     test_roundtrip();
     test_format();
     test_version();
+    test_uid_gid();
     TEST_MAIN_END();
 }

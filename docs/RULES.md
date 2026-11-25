@@ -112,10 +112,17 @@ profile /dev/vendor_can {
 ```
 
 * `default allow|block`: what happens if no `allow` line matches.
-* `allow <op> [<code> | <lo>..<hi>] [client "<name>"] [maxlen <n>]`:
+* `allow <op> [<code> | <lo>..<hi>] [client "<name>"] [uid <n>] [gid <n>] [maxlen <n>]`:
   matches when op matches, code within range (devctl only; same short
   code convenience as patches), client process name equals `<name>` if
-  given, and `len <= maxlen` if given.
+  given, effective uid/gid equal `<n>` if given, and the size bound holds
+  if `maxlen` is given.
+* `client "<name>"` matches the basename of the client's executable, which
+  a process can change; `uid`/`gid` match the effective user and group id
+  that the kernel reports for the connecting process (`_client_info`), so
+  they are the stronger authorization key. Use `uid`/`gid` when the rule is
+  a security boundary and `client` mainly for readability or learned
+  allow-lists.
 * `rate <n> per s [client "<name>"]`: limit messages per second per
   client process. Exceeding the rate yields BLOCK with reason RATE.
 * At most one profile per path.

@@ -155,6 +155,10 @@ static void put_profile(out_t *o, const splint_profile_t *pf)
             put(o, " client ");
             put_quoted(o, a->client, SPLINT_NAME_MAX - 1);
         }
+        if (a->has_uid)
+            put(o, " uid %llu", (unsigned long long)a->uid);
+        if (a->has_gid)
+            put(o, " gid %llu", (unsigned long long)a->gid);
         if (a->has_maxlen)
             put(o, " maxlen %llu", (unsigned long long)a->maxlen);
         put(o, "\n");

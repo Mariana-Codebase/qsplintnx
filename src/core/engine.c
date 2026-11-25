@@ -273,6 +273,12 @@ static bool allow_match(const splint_allow_t *a, const splint_msg_t *m,
     }
     if (a->has_client && (!cname || strcmp(a->client, cname) != 0))
         return false;
+    /* uid/gid come from the kernel's _client_info, so they are a stronger
+     * authorization key than the executable name, which a process can change. */
+    if (a->has_uid && (!m->client || m->client->uid != a->uid))
+        return false;
+    if (a->has_gid && (!m->client || m->client->gid != a->gid))
+        return false;
     if (a->has_maxlen && splint_effective_len(m) > a->maxlen)
         return false;
     return true;

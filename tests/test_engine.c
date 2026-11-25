@@ -723,9 +723,36 @@ static void test_set_rules_status(void)
     splint_engine_free(e);
 }
 
+/* An allow line with uid matches the client's kernel-verified uid, not its
+ * name: same executable name, different uid -> different verdict. */
+static void test_uid_match(void)
+{
+    splint_engine_t *e = splint_engine_new();
+    splint_ruleset_t *rs = rs_new();
+    splint_profile_t *pf = add_profile(rs, PATH, true);   /* default block */
+    splint_allow_t *a = add_allow(pf, SPLINT_OP_WRITE);
+    a->has_uid = true; a->uid = 1000;
+    splint_engine_set_rules(e, rs);
+
+    splint_client_t good = { 100, 1000, 0, "can_client" };
+    splint_client_t wrong_uid = { 101, 1001, 0, "can_client" }; /* same name! */
+
+    splint_msg_t m;
+    memset(&m, 0, sizeof m);
+    m.op = SPLINT_OP_WRITE; m.path = PATH; m.now_ns = NS;
+
+    m.client = &good;
+    CHECK(run(e, &m).action == SPLINT_ALLOW);
+    m.client = &wrong_uid;
+    CHECK(run(e, &m).action == SPLINT_BLOCK);
+
+    splint_engine_free(e);
+}
+
 int main(void)
 {
     test_set_rules_status();
+    test_uid_match();
     test_null_ruleset();
     test_operands_and_cmps();
     test_patch_matching();
